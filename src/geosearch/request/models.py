@@ -38,3 +38,14 @@ class ErrorEnvelope(BaseModel):
     code: ErrorCode
     message: str
     details: dict[str, Any] = {}
+
+
+class UsageSummary(BaseModel):
+    """The token cost of one turn, surfaced in the API response. The full
+    per-call ledger goes only to the eval report, not here (Stage 2 §11)."""
+
+    model_calls: int
+    input_tokens: int
+    output_tokens: int
+    peak_input_tokens: int
+    over_budget: bool

@@ -20,6 +20,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from geosearch.agent.context import AgentContext
+from geosearch.agent.ledger import TokenLedgerMiddleware
 from geosearch.agent.middleware import AreaSummaryMiddleware
 from geosearch.agent.prompts import SYSTEM_PROMPT
 from geosearch.agent.state import GeoAgentState
@@ -43,6 +44,8 @@ def build_agent(
             run_limit=cfg.agent.max_model_calls_per_turn,
             exit_behavior="end",
         ),
+        # Last, so it measures the request exactly as the model receives it.
+        TokenLedgerMiddleware(),
     ]
 
     return create_deep_agent(

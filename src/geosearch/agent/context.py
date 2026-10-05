@@ -8,12 +8,11 @@ Why a runtime context rather than module globals:
 
 It is passed with `context_schema=AgentContext` at build time and a fresh
 instance per turn via `agent.invoke(..., context=AgentContext(...))`.
-
-(The token ledger, added in step 4, will also live here — fresh per turn.)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from geosearch.agent.ledger import TokenLedger
 from geosearch.config import GeoConfig
 from geosearch.geo.ops import AreaOps
 
@@ -24,3 +23,4 @@ class AgentContext:
 
     area_ops: AreaOps  # reads geometry by area_id (Stage 1)
     cfg: GeoConfig
+    ledger: TokenLedger = field(default_factory=TokenLedger)  # fresh per turn
