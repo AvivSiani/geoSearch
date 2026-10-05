@@ -1,20 +1,57 @@
-"""POST /v1/requests — Stage 1's only endpoint. In Stage 2 the agent runs
-behind this same endpoint, so clients never need to change."""
+"""POST /v1/requests — the agent runs behind the same endpoint as Stage 1, so
+clients that only need an answer never change. The route is a thin translation
+layer: it hands the request to the RequestRunner and maps model-connectivity
+failures to a typed 503."""
 
+import httpx
 from fastapi import APIRouter, Request
 
-from geosearch.request.models import ErrorEnvelope, UserRequest, ValidatedRequest
-from geosearch.request.validate import validate_request
+from geosearch.errors import ErrorCode, GeoValidationError
+from geosearch.request.models import AgentResponse, ErrorEnvelope, UserRequest
 
 router = APIRouter()
+
+# Connectivity failures that mean "the model server isn't reachable" rather than
+# a bug. GeoValidationError is not among these, so typed validation/conversation
+# errors propagate untouched to their own handler.
+_MODEL_DOWN_ERRORS = (
+    ConnectionError,
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadTimeout,
+    httpx.TimeoutException,
+)
 
 
 @router.post(
     "/v1/requests",
-    response_model=ValidatedRequest,
-    responses={422: {"model": ErrorEnvelope}},
+    response_model=AgentResponse,
+    responses={
+        404: {"model": ErrorEnvelope},
+        409: {"model": ErrorEnvelope},
+        422: {"model": ErrorEnvelope},
+        503: {"model": ErrorEnvelope},
+    },
 )
-def create_request(request: UserRequest, http_request: Request) -> ValidatedRequest:
-    """Sync def: validation is CPU-bound shapely/pyproj work, not I/O."""
-    state = http_request.app.state
-    return validate_request(request, state.cfg, state.store, state.ops, state.buffer_strategy)
+def create_request(request: UserRequest, http_request: Request) -> AgentResponse:
+    """Sync def: the agent invoke is driven synchronously; FastAPI runs it in a
+    worker thread."""
+    runner = http_request.app.state.runner
+    try:
+        outcome = runner.handle(request)
+    except _MODEL_DOWN_ERRORS as exc:
+        raise GeoValidationError(
+            ErrorCode.MODEL_UNAVAILABLE,
+            "the model server is unreachable",
+            {"error": str(exc)},
+        ) from exc
+
+    return AgentResponse(
+        conversation_id=outcome.conversation_id,
+        turn=outcome.turn,
+        request_id=outcome.request_id,
+        area_summary=outcome.area_summary,
+        answer=outcome.answer,
+        stopped_reason=outcome.stopped_reason,
+        usage=outcome.usage,
+    )

@@ -1,41 +1,104 @@
 import pytest
 from conftest import BOWTIE, BROKEN, EMPTY, HANDOFF_POLYGON, HUGE, LINE, OUT_OF_RANGE, TLV_POINT
 from fastapi.testclient import TestClient
+from scripted_model import ScriptedChatModel, ai
 
 from geosearch.api.app import create_app
 from geosearch.config import GeoConfig, LimitsConfig, PointBufferConfig
 from geosearch.errors import ErrorCode
 
 
+def _client(cfg: GeoConfig | None = None, responses: list | None = None) -> TestClient:
+    """A TestClient with a scripted model, so the endpoint runs end-to-end
+    without a real model server. Validation-error tests never reach the model."""
+    cfg = cfg or GeoConfig(_env_file=None)
+    model = ScriptedChatModel(responses=responses or [ai("The area is about 26.2 km².")])
+    return TestClient(create_app(cfg, model=model))
+
+
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(create_app(GeoConfig(_env_file=None)))
+    return _client()
 
 
-def test_handoff_polygon_returns_200(client: TestClient) -> None:
+# --- success path (now returns an AgentResponse, not a ValidatedRequest) ---
+
+
+def test_handoff_polygon_returns_agent_response(client: TestClient) -> None:
     response = client.post(
-        "/v1/requests", json={"wkt": HANDOFF_POLYGON, "prompt": "find a good restaurant"}
+        "/v1/requests", json={"wkt": HANDOFF_POLYGON, "prompt": "How big is this area?"}
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["area_id"].startswith("area_")
-    assert body["area_km2"] == pytest.approx(26.2, rel=0.02)
-    assert "area_summary" in body
+    assert body["conversation_id"]
+    assert body["turn"] == 1
+    assert body["stopped_reason"] == "finished"
+    assert "km²" in body["area_summary"]
+    assert body["answer"]
+    assert body["usage"]["model_calls"] >= 1
+    # The response carries no geometry and no server-only identifiers.
+    assert "area_id" not in body
+    assert "wkt" not in body
 
 
-def test_buffered_point_returns_200_with_buffer_info(client: TestClient) -> None:
+def test_buffered_point_summary_reports_circle(client: TestClient) -> None:
     response = client.post(
-        "/v1/requests", json={"wkt": TLV_POINT, "prompt": "find a good restaurant"}
+        "/v1/requests", json={"wkt": TLV_POINT, "prompt": "describe it"}
     )
     assert response.status_code == 200
-    body = response.json()
-    assert body["input_geometry_type"] == "Point"
-    assert body["buffer_radius_m"] == 10.0
-    assert body["buffer_strategy"] == "geodesic_circle"
-    assert any("buffered" in note for note in body["notes"])
+    # The only allowed geographic transform is reported in the area summary.
+    assert "circle from Point" in response.json()["area_summary"]
+    assert "r=10 m" in response.json()["area_summary"]
 
 
-# --- one 422 test per error code ---
+def test_follow_up_without_wkt(client: TestClient) -> None:
+    first = client.post(
+        "/v1/requests", json={"wkt": HANDOFF_POLYGON, "prompt": "How big is this area?"}
+    ).json()
+    second = client.post(
+        "/v1/requests",
+        json={"prompt": "and again?", "conversation_id": first["conversation_id"]},
+    )
+    assert second.status_code == 200
+    assert second.json()["turn"] == 2
+    assert second.json()["conversation_id"] == first["conversation_id"]
+
+
+def test_follow_up_different_area_is_area_mismatch(client: TestClient) -> None:
+    first = client.post(
+        "/v1/requests", json={"wkt": HANDOFF_POLYGON, "prompt": "q1"}
+    ).json()
+    response = client.post(
+        "/v1/requests",
+        json={
+            "wkt": "POLYGON((0 0, 0.01 0, 0.01 0.01, 0 0.01, 0 0))",
+            "prompt": "q2",
+            "conversation_id": first["conversation_id"],
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == ErrorCode.AREA_MISMATCH
+
+
+def test_unknown_conversation_returns_404(client: TestClient) -> None:
+    response = client.post(
+        "/v1/requests", json={"prompt": "q", "conversation_id": "nope"}
+    )
+    assert response.status_code == 404
+    assert response.json()["code"] == ErrorCode.CONVERSATION_NOT_FOUND
+
+
+def test_client_supplied_area_id_is_ignored(client: TestClient) -> None:
+    response = client.post(
+        "/v1/requests",
+        json={"wkt": HANDOFF_POLYGON, "prompt": "x", "area_id": "area_hacked"},
+    )
+    assert response.status_code == 200
+    # area_id is never accepted from, nor returned to, the client.
+    assert "area_id" not in response.json()
+
+
+# --- validation errors (unchanged from Stage 1; never reach the model) ---
 
 
 def test_missing_wkt_field(client: TestClient) -> None:
@@ -74,7 +137,7 @@ def test_prompt_too_long(client: TestClient) -> None:
 
 def test_wkt_too_large_by_byte_size() -> None:
     cfg = GeoConfig(_env_file=None, limits=LimitsConfig(max_wkt_bytes=50))
-    client = TestClient(create_app(cfg))
+    client = _client(cfg)
     response = client.post("/v1/requests", json={"wkt": HANDOFF_POLYGON, "prompt": "x"})
     assert response.status_code == 422
     assert response.json()["code"] == ErrorCode.WKT_TOO_LARGE
@@ -100,7 +163,7 @@ def test_empty_geometry_is_invalid(client: TestClient) -> None:
 
 def test_wkt_too_large_by_vertex_count() -> None:
     cfg = GeoConfig(_env_file=None, limits=LimitsConfig(max_vertices=3))
-    client = TestClient(create_app(cfg))
+    client = _client(cfg)
     response = client.post("/v1/requests", json={"wkt": HANDOFF_POLYGON, "prompt": "x"})
     assert response.status_code == 422
     assert response.json()["code"] == ErrorCode.WKT_TOO_LARGE
@@ -142,7 +205,7 @@ def test_buffer_radius_out_of_range() -> None:
             allow_request_override=True, min_radius_m=1.0, max_radius_m=5_000.0
         ),
     )
-    client = TestClient(create_app(cfg))
+    client = _client(cfg)
     response = client.post(
         "/v1/requests", json={"wkt": TLV_POINT, "prompt": "x", "point_buffer_m": 50_000.0}
     )
@@ -157,7 +220,7 @@ def test_antimeridian_crossing_is_out_of_range() -> None:
             allow_request_override=True, min_radius_m=1.0, max_radius_m=5_000.0
         ),
     )
-    client = TestClient(create_app(cfg))
+    client = _client(cfg)
     response = client.post(
         "/v1/requests",
         json={"wkt": "POINT(179.999 0)", "prompt": "x", "point_buffer_m": 5_000.0},
@@ -170,15 +233,6 @@ def test_area_too_large(client: TestClient) -> None:
     response = client.post("/v1/requests", json={"wkt": HUGE, "prompt": "x"})
     assert response.status_code == 422
     assert response.json()["code"] == ErrorCode.AREA_TOO_LARGE
-
-
-def test_client_supplied_area_id_is_ignored(client: TestClient) -> None:
-    response = client.post(
-        "/v1/requests",
-        json={"wkt": HANDOFF_POLYGON, "prompt": "x", "area_id": "area_hacked"},
-    )
-    assert response.status_code == 200
-    assert response.json()["area_id"] != "area_hacked"
 
 
 def test_openapi_documents_error_envelope_for_422(client: TestClient) -> None:

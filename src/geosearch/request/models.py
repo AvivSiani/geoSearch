@@ -54,3 +54,16 @@ class UsageSummary(BaseModel):
     output_tokens: int
     peak_input_tokens: int
     over_budget: bool
+
+
+class AgentResponse(BaseModel):
+    """What POST /v1/requests returns in Stage 2: the agent's answer plus the
+    conversation handle and the turn's token cost. Carries no geometry."""
+
+    conversation_id: str
+    turn: int
+    request_id: str
+    area_summary: str
+    answer: str
+    stopped_reason: Literal["finished", "call_limit"]
+    usage: UsageSummary
