@@ -172,6 +172,15 @@ def test_area_too_large(client: TestClient) -> None:
     assert response.json()["code"] == ErrorCode.AREA_TOO_LARGE
 
 
+def test_client_supplied_area_id_is_ignored(client: TestClient) -> None:
+    response = client.post(
+        "/v1/requests",
+        json={"wkt": HANDOFF_POLYGON, "prompt": "x", "area_id": "area_hacked"},
+    )
+    assert response.status_code == 200
+    assert response.json()["area_id"] != "area_hacked"
+
+
 def test_openapi_documents_error_envelope_for_422(client: TestClient) -> None:
     schema = client.get("/openapi.json").json()
     responses = schema["paths"]["/v1/requests"]["post"]["responses"]

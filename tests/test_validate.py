@@ -122,6 +122,30 @@ def test_area_too_large_is_rejected(
     assert exc_info.value.code == ErrorCode.AREA_TOO_LARGE
 
 
+def test_different_configured_radius_gives_different_area_id(
+    store: AreaStore, ops: AreaOps, buffer_strategy: BufferStrategy
+) -> None:
+    cfg_10m = GeoConfig(_env_file=None, point_buffer=PointBufferConfig(default_radius_m=10.0))
+    cfg_20m = GeoConfig(_env_file=None, point_buffer=PointBufferConfig(default_radius_m=20.0))
+    request = UserRequest(wkt=TLV_POINT, prompt="x")
+
+    result_10m = validate_request(request, cfg_10m, store, ops, buffer_strategy)
+    result_20m = validate_request(request, cfg_20m, store, ops, buffer_strategy)
+
+    assert result_10m.area_id != result_20m.area_id
+
+
+def test_client_cannot_supply_area_id(
+    cfg: GeoConfig, store: AreaStore, ops: AreaOps, buffer_strategy: BufferStrategy
+) -> None:
+    request = UserRequest.model_validate(
+        {"wkt": HANDOFF_POLYGON, "prompt": "x", "area_id": "area_hacked"}
+    )
+    result = validate_request(request, cfg, store, ops, buffer_strategy)
+    assert result.area_id != "area_hacked"
+    assert result.area_id.startswith("area_")
+
+
 def test_invalid_geometry_stores_nothing(
     cfg: GeoConfig, store: AreaStore, ops: AreaOps, buffer_strategy: BufferStrategy
 ) -> None:
