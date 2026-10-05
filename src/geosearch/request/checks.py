@@ -88,7 +88,7 @@ def check_not_empty(geom: BaseGeometry) -> None:
 
 def check_vertex_count(geom: BaseGeometry, max_vertices: int) -> None:
     """Row 10: reuses WKT_TOO_LARGE, now measuring shape complexity instead of byte size."""
-    count = shapely.get_num_coordinates(geom)
+    count = int(shapely.get_num_coordinates(geom))
     if count > max_vertices:
         raise GeoValidationError(
             ErrorCode.WKT_TOO_LARGE,
