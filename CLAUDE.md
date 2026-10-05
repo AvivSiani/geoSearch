@@ -23,10 +23,57 @@ Responsibility split, which guides every design choice:
    `api/` is a thin translation layer.
 6. **Stage 1 has no LLM, agent, MongoDB or network calls.**
 
+### Stage 2 invariants (agent)
+
+7. **The model never sees WKT.** Not in the system prompt, not in messages, not
+   in tool results. `GeoAgentState.conversation.area_wkt` is server-side only.
+8. **The model never chooses the area.** Area tools take **no** area argument;
+   they read `area_id` from state (`geo_describe_area`).
+9. **One conversation, one area.** A follow-up cannot change the area; a re-sent
+   WKT that resolves to a different `area_id` is `AREA_MISMATCH`.
+10. **All model and budget numbers live in config.** Changing model, provider or
+    window is a config change (`GEOSEARCH_LLM__*`, `GEOSEARCH_BUDGET__*`), never
+    a code change.
+11. **`agent/model.py` is the only module that imports a provider class.**
+    Everything else receives a `BaseChatModel`.
+12. **Tests never need a GPU or a running model** — except `scripts/smoke_model.py`
+    and the eval harness. Everything in `pytest` uses `tests/scripted_model.py`.
+
+## Verified library APIs (Stage 2, pinned versions)
+
+Pinned: `deepagents==0.7.21`, `langchain==1.4.3`, `langgraph==1.2.12`,
+`langchain-ollama==1.1.0`, `langchain-openai==1.6.7`. Facts confirmed against
+these; re-verify on upgrade:
+
+- **ChatOllama** thinking mode is the `reasoning` param (not `thinking`/`think`);
+  it fills `usage_metadata`. `num_ctx` carries our window (confirmed via `/api/ps`
+  `context_length`).
+- **ToolRuntime** imports from `langchain.tools` as `ToolRuntime[Context, State]`;
+  a `runtime`-only tool exposes an empty `properties` schema.
+- **Middleware**: append to the system prompt with
+  `request.override(system_message=SystemMessage(...))` in `wrap_model_call`;
+  user middleware whose `.name` matches a base-stack one *replaces it in place*
+  (so we swap `FilesystemMiddleware`/`SummarizationMiddleware`). Call-limit
+  middleware is `ModelCallLimitMiddleware(run_limit=..., exit_behavior="end")`; on
+  the cap it appends an AIMessage starting `"Model call limits exceeded"` — the
+  only signal of a call-limit stop (`run_model_call_count` is not surfaced).
+- **deepagents default tools**: `ls, read_file, write_file, edit_file, glob, grep,
+  delete, task`. There is **no `write_todos`** and **no `execute`** (execute needs
+  a sandbox backend). Harness trimming via `HarnessProfile.excluded_tools` is keyed
+  by `provider:model`, so to stay model-agnostic we use a `FilesystemMiddleware`
+  allowlist plus our own `ToolAllowlistMiddleware`.
+- **StateBackend files** live under the `"files"` state key as a path→`FileData`
+  dict; build entries with `deepagents.backends.state.create_file_data`. File
+  updates merge across turns.
+- **Prompt-cache caveat (§11): did NOT reproduce** on Ollama 0.35.1 — a repeated
+  prompt reported identical `input_tokens`. The ledger's truncation check is still
+  conservative (warn-only, first call of the turn) in case other servers differ.
+
 ## Conventions
 
 - Python 3.12, managed with `uv`. Run `uv run pytest` and `uv run ruff check .`
-  before considering any step done.
+  before considering any step done. The eval harness runs separately against the
+  real model: `uv run python -m evals.run --suite stage2`.
 - `src/` layout. Type hints everywhere.
 - Config via `pydantic-settings`, env prefix `GEOSEARCH_`, nested delimiter
   `__` (e.g. `GEOSEARCH_POINT_BUFFER__DEFAULT_RADIUS_M=1000`). Config is

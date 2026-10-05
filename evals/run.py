@@ -148,22 +148,28 @@ def _token_stats(reports: list[CaseReport]) -> dict[str, float]:
     }
 
 
-def _write_reports(
-    suite: str, harness: str, runs: int, cfg: GeoConfig, reports: list[CaseReport]
-) -> Path:
-    REPORT_DIR.mkdir(exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    base = REPORT_DIR / f"{stamp}-{suite}-{harness}"
-    stats = _token_stats(reports)
+def _run_suite(suite: dict, runs: int, harness: str) -> dict:
+    """Run every case `runs` times for one harness and return its payload dict."""
+    cfg = GeoConfig(_env_file=None)
+    cfg.agent.harness = harness
+    model = build_chat_model(cfg.llm, cfg.budget)
+    default_wkt = suite["wkt"]
 
-    payload = {
-        "suite": suite,
+    reports: list[CaseReport] = []
+    for case in suite["cases"]:
+        case_report = CaseReport(name=case["name"])
+        for _ in range(runs):
+            case_report.runs.append(_run_case(case, cfg, model, default_wkt))
+        reports.append(case_report)
+        print(f"  {harness:8s} {case['name']:20s} {case_report.pass_rate:.0%}")
+
+    return {
+        "suite": suite.get("name", "stage2"),
         "harness": harness,
         "runs": runs,
         "model": cfg.llm.model,
         "provider": cfg.llm.provider,
         "effective_input_budget": cfg.budget.effective_input_budget,
-        "timestamp": stamp,
         "cases": {
             cr.name: {
                 "pass_rate": cr.pass_rate,
@@ -171,10 +177,7 @@ def _write_reports(
                 "runs": len(cr.runs),
                 "sample_answer": cr.runs[0].turns[-1].answer if cr.runs else "",
                 "turns": [
-                    [
-                        {"type": c.type, "passed": c.passed, "detail": c.detail}
-                        for c in t.checks
-                    ]
+                    [{"type": c.type, "passed": c.passed, "detail": c.detail} for c in t.checks]
                     for t in cr.runs[0].turns
                 ]
                 if cr.runs
@@ -182,48 +185,50 @@ def _write_reports(
             }
             for cr in reports
         },
-        "tokens": stats,
-        "notes": [CANT_DO_NOTE],
+        "tokens": _token_stats(reports),
     }
-    base.with_suffix(".json").write_text(json.dumps(payload, indent=2))
-    base.with_suffix(".md").write_text(_markdown(payload))
-    return base
 
 
-def _markdown(p: dict) -> str:
+def _combined_markdown(suite: str, stamp: str, payloads: list[dict]) -> str:
+    """Pass-rate and token-cost comparison across the harnesses that were run."""
+    first = payloads[0]
     lines = [
-        f"# Eval report — {p['suite']} ({p['harness']} harness)",
+        f"# Eval report — {suite}",
         "",
-        f"- Model: `{p['provider']}:{p['model']}`",
-        f"- Runs per case: {p['runs']}",
-        f"- Effective input budget: {p['effective_input_budget']} tokens",
-        f"- Generated: {p['timestamp']}",
+        f"- Model: `{first['provider']}:{first['model']}`",
+        f"- Runs per case: {first['runs']}",
+        f"- Effective input budget: {first['effective_input_budget']} tokens",
+        f"- Harnesses: {', '.join(p['harness'] for p in payloads)}",
+        f"- Generated: {stamp}",
         "",
-        "## Pass rates",
+        "## Pass rate by case",
         "",
-        "| Case | Pass rate | Runs passed |",
-        "| --- | --- | --- |",
+        "| Case | " + " | ".join(p["harness"] for p in payloads) + " |",
+        "| --- | " + " | ".join("---" for _ in payloads) + " |",
     ]
-    for name, c in p["cases"].items():
-        lines.append(f"| {name} | {c['pass_rate']:.0%} | {c['runs_passed']}/{c['runs']} |")
-    s = p["tokens"]
+    for name in first["cases"]:
+        cells = " | ".join(f"{p['cases'][name]['pass_rate']:.0%}" for p in payloads)
+        lines.append(f"| {name} | {cells} |")
+
     lines += [
         "",
-        "## Token cost (per model call, averaged)",
+        "## Token cost per model call (averaged)",
         "",
-        "| Metric | Value |",
-        "| --- | --- |",
-        f"| System prompt tokens | {s.get('mean_system_tokens', 0)} |",
-        f"| Tool-schema tokens | {s.get('mean_tool_schema_tokens', 0)} |",
-        f"| Message tokens | {s.get('mean_message_tokens', 0)} |",
-        f"| Mean input / call | {s.get('mean_input_per_call', 0)} |",
-        f"| Peak input / call | {s.get('peak_input_per_call', 0)} |",
-        f"| Mean calls / turn | {s.get('mean_calls_per_turn', 0)} |",
-        "",
-        "## Notes",
-        "",
+        "| Metric | " + " | ".join(p["harness"] for p in payloads) + " |",
+        "| --- | " + " | ".join("---" for _ in payloads) + " |",
     ]
-    lines += [f"- {n}" for n in p["notes"]]
+    for label, key in [
+        ("System prompt tokens", "mean_system_tokens"),
+        ("Tool-schema tokens", "mean_tool_schema_tokens"),
+        ("Message tokens", "mean_message_tokens"),
+        ("Mean input / call", "mean_input_per_call"),
+        ("Peak input / call", "peak_input_per_call"),
+        ("Mean calls / turn", "mean_calls_per_turn"),
+    ]:
+        cells = " | ".join(str(p["tokens"].get(key, 0)) for p in payloads)
+        lines.append(f"| {label} | {cells} |")
+
+    lines += ["", "## Notes", "", f"- {CANT_DO_NOTE}"]
     return "\n".join(lines) + "\n"
 
 
@@ -231,26 +236,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run GeoSearch eval suite.")
     parser.add_argument("--suite", default="stage2")
     parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--harness", choices=["default", "trimmed"], default="default")
+    parser.add_argument(
+        "--harness", choices=["default", "trimmed", "both"], default="both"
+    )
     args = parser.parse_args()
 
     suite = yaml.safe_load((SUITE_DIR / f"{args.suite}.yaml").read_text())
-    default_wkt = suite["wkt"]
+    harnesses = ["default", "trimmed"] if args.harness == "both" else [args.harness]
 
-    cfg = GeoConfig(_env_file=None)
-    cfg.agent.harness = args.harness
-    model = build_chat_model(cfg.llm, cfg.budget)
+    REPORT_DIR.mkdir(exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    payloads = [_run_suite(suite, args.runs, h) for h in harnesses]
 
-    reports: list[CaseReport] = []
-    for case in suite["cases"]:
-        case_report = CaseReport(name=case["name"])
-        for _ in range(args.runs):
-            case_report.runs.append(_run_case(case, cfg, model, default_wkt))
-        reports.append(case_report)
-        print(f"{case['name']:20s} {case_report.pass_rate:.0%}")
+    for payload in payloads:
+        path = REPORT_DIR / f"{stamp}-{args.suite}-{payload['harness']}.json"
+        path.write_text(json.dumps(payload, indent=2))
 
-    base = _write_reports(args.suite, args.harness, args.runs, cfg, reports)
-    print(f"\nReport: {base}.md")
+    md_path = REPORT_DIR / f"{stamp}-{args.suite}.md"
+    md_path.write_text(_combined_markdown(args.suite, stamp, payloads))
+    print(f"\nReport: {md_path}")
 
 
 if __name__ == "__main__":

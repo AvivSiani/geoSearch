@@ -1,5 +1,5 @@
-# Stage 2 eval cases. All use HANDOFF_POLYGON (~26.2 km²).
-# Multi-turn cases (follow_up_units, long_conversation) are added in step 9.
+# Stage 2 eval cases. All use HANDOFF_POLYGON (~26.2 km² / ~10.1 sq mi).
+name: stage2
 wkt: "POLYGON((34.75 32.05, 34.80 32.05, 34.80 32.10, 34.75 32.10, 34.75 32.05))"
 
 cases:
@@ -50,4 +50,35 @@ cases:
       - prompt: "hi"
         checks:
           - type: answer_non_empty
+          - type: under_budget
+
+  # --- multi-turn cases ---
+
+  - name: follow_up_units
+    turns:
+      - prompt: "How big is this area?"
+        checks:
+          - type: answer_non_empty
+      - prompt: "And in square miles?"  # no wkt: the area carries over
+        checks:
+          - type: answer_number_within
+            value: 10.1
+            rel: 0.05
+
+  - name: long_conversation
+    turns:
+      - prompt: "How big is this area?"
+        checks:
+          - type: under_budget
+      - prompt: "Roughly where is it?"
+        checks:
+          - type: under_budget
+      - prompt: "What is its bounding box?"
+        checks:
+          - type: under_budget
+      - prompt: "Is it north or south of the equator?"
+        checks:
+          - type: under_budget
+      - prompt: "Give me a one-line summary of the area."
+        checks:
           - type: under_budget
