@@ -14,6 +14,14 @@ dependencies = [
     "pyproj>=3.8.0",
     "shapely>=2.0",
     "uvicorn>=0.54.0",
+    # Stage 2: pinned exactly (deepagents 0.7.x is beta; LangChain v1 middleware
+    # APIs move between minors). See SPECS stage-2 §5.
+    "deepagents==0.7.21",
+    "langchain==1.4.3",
+    "langgraph==1.2.12",
+    "langchain-ollama==1.1.0",
+    "langchain-openai==1.6.7",
+    "pyyaml==6.0.3",
 ]
 
 [build-system]

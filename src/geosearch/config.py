@@ -6,7 +6,7 @@ clear message rather than surfacing as a confusing runtime error later.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -63,6 +63,95 @@ class AreaStoreConfig(BaseModel):
         return self
 
 
+class LLMConfig(BaseModel):
+    """Which model to talk to and how. Changing provider, model or server is a
+    config change, never a code change (Stage 2 invariant 4). Only agent/model.py
+    reads this (invariant 5)."""
+
+    provider: Literal["ollama", "openai_compatible"] = "ollama"
+    model: str = "gemma4:12b"
+    base_url: str = "http://localhost:11434"  # vLLM example: http://host:8000/v1
+    api_key: SecretStr = SecretStr("EMPTY")  # openai_compatible only
+    temperature: float = 0.0
+    thinking: bool = False  # Gemma 4 thinking mode (ChatOllama `reasoning`)
+    keep_alive: str = "10m"  # ollama only
+    timeout_s: float = 120.0
+
+
+class ContextBudgetConfig(BaseModel):
+    """The small-context discipline, entirely in numbers. Defaults are sized for
+    a 12B model at a 16K window (stage-2 §6)."""
+
+    context_window: int = 16_384  # Ollama num_ctx / server max length
+    max_output_tokens: int = 1_024
+    safety_margin_tokens: int = 2_048
+    input_budget_tokens: int | None = None  # None -> window - output - margin
+    summarize_at_fraction: float = 0.75  # of the input budget
+    truncation_warn_ratio: float = 0.6  # token ledger, stage-2 §11
+
+    @property
+    def effective_input_budget(self) -> int:
+        """How many tokens a single model call's input may use. Either set
+        explicitly, or what's left of the window after output and safety margin."""
+        if self.input_budget_tokens is not None:
+            return self.input_budget_tokens
+        return self.context_window - self.max_output_tokens - self.safety_margin_tokens
+
+    @model_validator(mode="after")
+    def _check_budget(self) -> "ContextBudgetConfig":
+        if self.max_output_tokens >= self.context_window:
+            raise ValueError(
+                "budget.max_output_tokens must be < context_window, got "
+                f"{self.max_output_tokens} >= {self.context_window}"
+            )
+        if not (0 < self.summarize_at_fraction < 1):
+            raise ValueError(
+                "budget.summarize_at_fraction must be in (0, 1), got "
+                f"{self.summarize_at_fraction}"
+            )
+        if self.effective_input_budget <= 0:
+            raise ValueError(
+                "budget.effective_input_budget must be > 0; window minus output "
+                f"minus margin was {self.effective_input_budget}"
+            )
+        return self
+
+
+class ConversationConfig(BaseModel):
+    """Multi-turn conversation bounds. The mongodb store is Stage 3."""
+
+    store: Literal["memory", "mongodb"] = "memory"
+    max_turns: int = 20
+    idle_ttl_minutes: int = 60
+
+    @model_validator(mode="after")
+    def _check_bounds(self) -> "ConversationConfig":
+        if self.max_turns < 1:
+            raise ValueError(f"conversation.max_turns must be >= 1, got {self.max_turns}")
+        if self.idle_ttl_minutes <= 0:
+            raise ValueError(
+                f"conversation.idle_ttl_minutes must be > 0, got {self.idle_ttl_minutes}"
+            )
+        return self
+
+
+class AgentConfig(BaseModel):
+    """How the Deep Agents harness is assembled. `trimmed` is the lean default;
+    `default` exists only to measure the baseline harness cost (stage-2 §9)."""
+
+    harness: Literal["default", "trimmed"] = "trimmed"
+    max_model_calls_per_turn: int = 8
+
+    @model_validator(mode="after")
+    def _check_calls(self) -> "AgentConfig":
+        if self.max_model_calls_per_turn < 1:
+            raise ValueError(
+                "agent.max_model_calls_per_turn must be >= 1, got "
+                f"{self.max_model_calls_per_turn}"
+            )
+        return self
+
+
 class GeoConfig(BaseSettings):
     """Root config. Env prefix GEOSEARCH_, nested delimiter __.
 
@@ -74,3 +163,7 @@ class GeoConfig(BaseSettings):
     point_buffer: PointBufferConfig = Field(default_factory=PointBufferConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
     area_store: AreaStoreConfig = Field(default_factory=AreaStoreConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    budget: ContextBudgetConfig = Field(default_factory=ContextBudgetConfig)
+    conversation: ConversationConfig = Field(default_factory=ConversationConfig)
+    agent: AgentConfig = Field(default_factory=AgentConfig)
