@@ -54,6 +54,19 @@ class ScriptedChatModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
+class CapturingChatModel(ScriptedChatModel):
+    """A scripted model that also records the tool names bound to it on the most
+    recent call, so tests can assert exactly what the harness offered."""
+
+    last_bound_tools: list[str] = []
+
+    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> "CapturingChatModel":
+        self.last_bound_tools = [
+            getattr(tool, "name", getattr(tool, "__name__", str(tool))) for tool in tools
+        ]
+        return self
+
+
 def ai(content: str, *, tool_calls: list[dict] | None = None, tokens: int = 10) -> AIMessage:
     """Build a scripted AIMessage with plausible usage_metadata (so the ledger
     has reported numbers to record)."""
