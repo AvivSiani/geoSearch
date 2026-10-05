@@ -1,15 +1,37 @@
-"""Running a single turn: build the turn's state, invoke the agent, read the
-answer. Conversations (loading prior state, follow-ups, the registry) are layered
-on top of this in step 7.
+"""Running turns.
+
+Two layers live here:
+  - the single-turn mechanics (build the turn's state, invoke, read the answer);
+  - the request orchestrator (RequestRunner) that turns a UserRequest into a
+    turn: it decides new-conversation vs follow-up, enforces area binding, seeds
+    working memory, and drives the ConversationRegistry.
+
+The area store is Stage 1's in-memory LRU. Because it can evict, a follow-up
+re-puts the conversation's stored WKT before the turn: the content-hash id is
+stable, so the same area_id comes back (Stage 2 §10).
 """
 
+import json
+import uuid
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import shapely
+from deepagents.backends.state import create_file_data
 from langchain_core.messages import AIMessage
 from langgraph.graph.state import CompiledStateGraph
 
 from geosearch.agent.context import AgentContext
+from geosearch.agent.conversations import ConversationRegistry
+from geosearch.agent.ledger import TokenLedger
+from geosearch.config import GeoConfig
+from geosearch.errors import ErrorCode, GeoValidationError
+from geosearch.geo.area_store import AreaStore
+from geosearch.geo.buffer import BufferStrategy
+from geosearch.geo.ops import AreaOps
+from geosearch.request.checks import check_prompt_length, check_prompt_present
+from geosearch.request.models import UsageSummary, UserRequest
+from geosearch.request.validate import validate_request
 
 StoppedReason = Literal["finished", "call_limit"]
 
@@ -26,7 +48,8 @@ class TurnOutcome:
     area_summary: str
     answer: str
     stopped_reason: StoppedReason
-    state: dict[str, Any]  # final graph state, for the ledger and conversations
+    usage: UsageSummary
+    state: dict[str, Any]  # final graph state, for conversations/debugging
 
 
 def build_new_turn_state(
@@ -53,6 +76,20 @@ def build_new_turn_state(
         },
         "request": {"request_id": request_id, "prompt": prompt},
         "search": {"iteration": 0, "candidate_count": 0, "status": "idle"},
+        "files": _seed_files(area_summary, turn, request_id, prompt),
+    }
+
+
+def _seed_files(area_summary: str, turn: int, request_id: str, prompt: str) -> dict[str, Any]:
+    """Working-memory seeds (Stage 2 §10). File entries merge across turns, so
+    re-writing /conversation.json each turn just refreshes the turn count."""
+    return {
+        "/conversation.json": create_file_data(
+            json.dumps({"area_summary": area_summary, "turn": turn})
+        ),
+        f"/turns/{turn}/request.json": create_file_data(
+            json.dumps({"request_id": request_id, "prompt": prompt})
+        ),
     }
 
 
@@ -79,8 +116,9 @@ def invoke_turn(
 ) -> TurnOutcome:
     """Invoke the agent for one turn and package the result.
 
-    A fresh AgentContext is passed per turn (invariant: never persisted, never
-    shown to the model). The thread_id routes checkpointing for conversations.
+    A fresh AgentContext is passed per turn (never persisted, never shown to the
+    model); its ledger is summarized into the outcome. thread_id routes
+    checkpointing for conversations.
     """
     config = {"configurable": {"thread_id": thread_id}} if thread_id else {}
     result = agent.invoke(state_update, context=context, config=config)
@@ -95,5 +133,100 @@ def invoke_turn(
         area_summary=conversation["area_summary"],
         answer=_last_ai_text(messages),
         stopped_reason="call_limit" if _was_call_limited(messages) else "finished",
+        usage=context.ledger.summary(),
         state=result,
     )
+
+
+@dataclass
+class RequestRunner:
+    """Turns a UserRequest into one agent turn. Built once (app startup) and
+    reused; holds the single built agent, the registry and the Stage 1 geo deps."""
+
+    cfg: GeoConfig
+    agent: CompiledStateGraph
+    registry: ConversationRegistry
+    store: AreaStore
+    ops: AreaOps
+    buffer_strategy: BufferStrategy
+
+    def _context(self) -> AgentContext:
+        return AgentContext(area_ops=self.ops, cfg=self.cfg, ledger=TokenLedger())
+
+    def handle(self, req: UserRequest) -> TurnOutcome:
+        if req.conversation_id is None:
+            return self._new_conversation(req)
+        return self._follow_up(req)
+
+    def _new_conversation(self, req: UserRequest) -> TurnOutcome:
+        validated = validate_request(req, self.cfg, self.store, self.ops, self.buffer_strategy)
+        area_wkt = shapely.to_wkt(self.store.get(validated.area_id))
+        conversation_id = self.registry.create(validated.area_id)
+
+        with self.registry.turn(conversation_id) as (_entry, turn):
+            state = build_new_turn_state(
+                conversation_id=conversation_id,
+                area_id=validated.area_id,
+                area_wkt=area_wkt,
+                area_summary=validated.area_summary,
+                request_id=validated.request_id,
+                prompt=validated.prompt,
+                turn=turn,
+            )
+            # The only turn that seeds the carry-across fields; later turns inherit
+            # them from the checkpointer.
+            state["intent"] = None
+            state["loaded_capabilities"] = []
+            return invoke_turn(self.agent, self._context(), state, thread_id=conversation_id)
+
+    def _follow_up(self, req: UserRequest) -> TurnOutcome:
+        conversation_id = req.conversation_id
+        assert conversation_id is not None
+        if req.wkt is None and req.point_buffer_m is not None:
+            raise GeoValidationError(
+                ErrorCode.BUFFER_NOT_APPLICABLE,
+                "point_buffer_m is not applicable to a follow-up that sends no wkt",
+            )
+        check_prompt_present(req.prompt)
+        check_prompt_length(req.prompt, self.cfg.limits.max_prompt_chars)
+
+        with self.registry.turn(conversation_id) as (entry, turn):
+            stored = self.agent.get_state(
+                {"configurable": {"thread_id": conversation_id}}
+            ).values["conversation"]
+            area_id = stored["area_id"]
+            area_wkt = stored["area_wkt"]
+            area_summary = stored["area_summary"]
+
+            # Area binding: a re-sent WKT must resolve to the same area_id.
+            if req.wkt is not None:
+                probe = validate_request(
+                    UserRequest(
+                        wkt=req.wkt, prompt=req.prompt, point_buffer_m=req.point_buffer_m
+                    ),
+                    self.cfg,
+                    self.store,
+                    self.ops,
+                    self.buffer_strategy,
+                )
+                if probe.area_id != area_id:
+                    raise GeoValidationError(
+                        ErrorCode.AREA_MISMATCH,
+                        "a follow-up cannot change the conversation's area",
+                        {"expected_area_id": area_id, "got_area_id": probe.area_id},
+                    )
+
+            # Re-put the stored area in case the LRU evicted it; the content hash
+            # yields the same area_id.
+            self.store.put(shapely.from_wkt(area_wkt))
+
+            state = build_new_turn_state(
+                conversation_id=conversation_id,
+                area_id=area_id,
+                area_wkt=area_wkt,
+                area_summary=area_summary,
+                request_id=uuid.uuid4().hex,
+                prompt=req.prompt.strip(),
+                turn=turn,
+            )
+            return invoke_turn(self.agent, self._context(), state, thread_id=conversation_id)

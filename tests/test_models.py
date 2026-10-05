@@ -10,11 +10,19 @@ def test_user_request_defaults() -> None:
     assert req.point_buffer_m is None
 
 
-def test_user_request_requires_wkt_and_prompt() -> None:
-    with pytest.raises(ValidationError):
-        UserRequest(prompt="find food")
+def test_user_request_requires_prompt() -> None:
+    # prompt is always required...
     with pytest.raises(ValidationError):
         UserRequest(wkt="POINT(1 1)")
+
+
+def test_user_request_wkt_optional_for_followups() -> None:
+    # ...but wkt is optional (a follow-up omits it), as is conversation_id.
+    req = UserRequest(prompt="find food")
+    assert req.wkt is None
+    assert req.conversation_id is None
+    follow_up = UserRequest(prompt="and again?", conversation_id="abc123")
+    assert follow_up.conversation_id == "abc123"
 
 
 def test_validated_request_round_trip() -> None:

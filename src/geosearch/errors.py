@@ -21,6 +21,13 @@ class ErrorCode(StrEnum):
     BUFFER_RADIUS_OUT_OF_RANGE = "BUFFER_RADIUS_OUT_OF_RANGE"
     AREA_TOO_LARGE = "AREA_TOO_LARGE"
 
+    # Stage 2: agent and conversation errors.
+    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
+    CONVERSATION_NOT_FOUND = "CONVERSATION_NOT_FOUND"
+    AREA_MISMATCH = "AREA_MISMATCH"
+    CONVERSATION_BUSY = "CONVERSATION_BUSY"
+    CONVERSATION_LIMIT = "CONVERSATION_LIMIT"
+
 
 class GeoValidationError(Exception):
     """The single exception type the core raises. api/ maps this to an ErrorEnvelope."""

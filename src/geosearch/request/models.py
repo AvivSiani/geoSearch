@@ -8,11 +8,16 @@ from geosearch.errors import ErrorCode
 
 
 class UserRequest(BaseModel):
-    """What a client sends: geographic context (WKT) plus intent (prompt)."""
+    """What a client sends: geographic context (WKT) plus intent (prompt).
 
-    wkt: str
+    `wkt` is required for a new conversation but omitted on a follow-up (the area
+    is already bound to the conversation). `conversation_id` turns a request into
+    a follow-up. `area_id` is never accepted from a client (invariant 4)."""
+
+    wkt: str | None = None
     prompt: str
     point_buffer_m: float | None = None
+    conversation_id: str | None = None
 
 
 class ValidatedRequest(BaseModel):
