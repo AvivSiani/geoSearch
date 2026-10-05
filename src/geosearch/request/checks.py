@@ -1,4 +1,4 @@
-"""Validation checks from spec section 9, rows 2-12.
+"""Validation checks from spec section 9, rows 2-12 and 16.
 
 Each check is a small, independently testable function that takes primitive
 arguments (not a GeoConfig) and raises GeoValidationError on failure.
@@ -6,12 +6,14 @@ request/validate.py is the only place these are composed, in order.
 """
 
 import shapely
+from pyproj import Geod
 from shapely.errors import GEOSException
 from shapely.geometry.base import BaseGeometry
 
 from geosearch.errors import ErrorCode, GeoValidationError
 
 SUPPORTED_GEOMETRY_TYPES = {"Polygon", "MultiPolygon", "Point"}
+_GEOD = Geod(ellps="WGS84")
 
 
 def check_wkt_present(wkt: str) -> None:
@@ -96,7 +98,7 @@ def check_vertex_count(geom: BaseGeometry, max_vertices: int) -> None:
 
 
 def check_coordinate_range(geom: BaseGeometry) -> None:
-    """Row 11 (and, reused, row 15 for a buffered circle): valid WGS84 ranges.
+    """Row 11: valid WGS84 ranges.
     Must run after check_not_empty — an empty geometry's bounds are all NaN."""
     min_lon, min_lat, max_lon, max_lat = geom.bounds
     if min_lon < -180 or max_lon > 180 or min_lat < -90 or max_lat > 90:
@@ -107,6 +109,25 @@ def check_coordinate_range(geom: BaseGeometry) -> None:
         )
 
 
+def check_no_antimeridian_crossing(geom: BaseGeometry) -> None:
+    """Row 15: a buffered circle near +/-180 longitude can cross the
+    antimeridian, which is out of scope.
+
+    A plain bbox check (check_coordinate_range) can't see this: pyproj's
+    inverse projection normalizes every output longitude back into
+    [-180, 180], so a wrapped circle's vertices each individually look
+    in-range — the tell is that *consecutive* vertices jump from ~180 to
+    ~-180 instead of varying smoothly. Detect that jump directly.
+    """
+    coords = list(geom.exterior.coords)
+    for (lon1, _), (lon2, _) in zip(coords, coords[1:], strict=False):
+        if abs(lon2 - lon1) > 180:
+            raise GeoValidationError(
+                ErrorCode.OUT_OF_RANGE,
+                "buffered circle crosses the antimeridian, which is out of scope",
+            )
+
+
 def check_geometry_is_valid(geom: BaseGeometry) -> None:
     """Row 12: never repair invalid geometry (invariant 1) — only report why it's invalid."""
     if not geom.is_valid:
@@ -114,4 +135,17 @@ def check_geometry_is_valid(geom: BaseGeometry) -> None:
             ErrorCode.INVALID_GEOMETRY,
             "geometry is not valid",
             {"reason": shapely.is_valid_reason(geom)},
+        )
+
+
+def check_area_within_limit(geom: BaseGeometry, max_area_km2: float) -> None:
+    """Row 16: applies to whichever geometry is about to be stored — the
+    buffered circle for a Point, or the input geometry otherwise."""
+    area, _ = _GEOD.geometry_area_perimeter(geom)
+    area_km2 = abs(area) / 1e6
+    if area_km2 > max_area_km2:
+        raise GeoValidationError(
+            ErrorCode.AREA_TOO_LARGE,
+            f"area is {area_km2:.1f} km², exceeding the limit of {max_area_km2} km²",
+            {"area_km2": area_km2, "max_area_km2": max_area_km2},
         )

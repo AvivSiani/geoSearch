@@ -5,16 +5,21 @@ from conftest import (
     BROKEN,
     EMPTY,
     HANDOFF_POLYGON,
+    HUGE,
     LINE,
     OUT_OF_RANGE,
     POINT_Z,
     TLV_POINT,
 )
+from shapely.geometry import Point
 
 from geosearch.errors import ErrorCode, GeoValidationError
+from geosearch.geo.buffer import GeodesicCircleBuffer
 from geosearch.request.checks import (
+    check_area_within_limit,
     check_coordinate_range,
     check_geometry_is_valid,
+    check_no_antimeridian_crossing,
     check_not_empty,
     check_prompt_length,
     check_prompt_present,
@@ -185,3 +190,31 @@ def test_check_geometry_is_valid_never_repairs() -> None:
         check_geometry_is_valid(bowtie)
     # the geometry object itself must be untouched
     assert shapely.to_wkt(bowtie, trim=True) == shapely.to_wkt(parse_wkt(BOWTIE), trim=True)
+
+
+# --- row 16: AREA_TOO_LARGE ---
+
+
+def test_check_area_within_limit_rejects_too_large() -> None:
+    with pytest.raises(GeoValidationError) as exc_info:
+        check_area_within_limit(parse_wkt(HUGE), max_area_km2=100.0)
+    assert exc_info.value.code == ErrorCode.AREA_TOO_LARGE
+
+
+def test_check_area_within_limit_accepts_within_limit() -> None:
+    check_area_within_limit(parse_wkt(HANDOFF_POLYGON), max_area_km2=100.0)
+
+
+# --- row 15: OUT_OF_RANGE (antimeridian) ---
+
+
+def test_check_no_antimeridian_crossing_rejects_wrapped_circle() -> None:
+    circle = GeodesicCircleBuffer(quad_segs=16).buffer(Point(179.999, 0.0), 5_000.0)
+    with pytest.raises(GeoValidationError) as exc_info:
+        check_no_antimeridian_crossing(circle)
+    assert exc_info.value.code == ErrorCode.OUT_OF_RANGE
+
+
+def test_check_no_antimeridian_crossing_accepts_normal_circle() -> None:
+    circle = GeodesicCircleBuffer(quad_segs=16).buffer(Point(10.0, 32.0), 500.0)
+    check_no_antimeridian_crossing(circle)

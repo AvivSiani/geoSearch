@@ -3,6 +3,9 @@
 import pytest
 
 from geosearch.config import GeoConfig
+from geosearch.geo.area_store import InMemoryAreaStore
+from geosearch.geo.buffer import STRATEGIES, BufferStrategy
+from geosearch.geo.ops import AreaOps
 
 HANDOFF_POLYGON = (
     "POLYGON((34.75 32.05, 34.80 32.05, 34.80 32.10, 34.75 32.10, 34.75 32.05))"
@@ -24,3 +27,18 @@ HUGE = "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))"
 def cfg() -> GeoConfig:
     """Default configuration, isolated from any environment overrides."""
     return GeoConfig(_env_file=None)
+
+
+@pytest.fixture
+def store(cfg: GeoConfig) -> InMemoryAreaStore:
+    return InMemoryAreaStore(max_entries=cfg.area_store.max_entries)
+
+
+@pytest.fixture
+def ops(store: InMemoryAreaStore) -> AreaOps:
+    return AreaOps(store)
+
+
+@pytest.fixture
+def buffer_strategy(cfg: GeoConfig) -> BufferStrategy:
+    return STRATEGIES[cfg.point_buffer.strategy](cfg.point_buffer)
