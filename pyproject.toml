@@ -1,0 +1,34 @@
+[project]
+name = "geosearch"
+version = "0.1.0"
+description = "GeoSearch Agent: a generic, spatially grounded agent"
+readme = "README.md"
+authors = [
+    { name = "Aviv Siani", email = "avivsiani120@icloud.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.142.2",
+    "pydantic>=2",
+    "pydantic-settings>=2.15.0",
+    "pyproj>=3.8.0",
+    "shapely>=2.0",
+    "uvicorn>=0.54.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
