@@ -29,6 +29,21 @@ uv run pytest
 uv run ruff check .
 ```
 
+## Tool registry
+
+Tool definitions (a `source_id` and a description) live in MongoDB; handler
+code lives in `src/geosearch/capabilities/`. Manage definitions with:
+
+```bash
+uv run geosearch-registry seed [PATHS] [--include-demo] [--prune]
+uv run geosearch-registry validate      # exit 1 on seed/DB drift
+uv run geosearch-registry list
+uv run geosearch-registry delete <source_id>
+```
+
+Exit codes: 0 ok, 1 validation problems, 2 usage or connection error. See
+"How to add a tool" in `CLAUDE.md`.
+
 ## Configure
 
 Configuration is validated at startup via `pydantic-settings` and fails fast
@@ -49,6 +64,14 @@ as the nested delimiter.
 | `limits.max_area_km2` | `GEOSEARCH_LIMITS__MAX_AREA_KM2` | `100.0` |
 | `limits.max_prompt_chars` | `GEOSEARCH_LIMITS__MAX_PROMPT_CHARS` | `2000` |
 | `area_store.max_entries` | `GEOSEARCH_AREA_STORE__MAX_ENTRIES` | `10000` |
+| `mongo.uri` | `GEOSEARCH_MONGO__URI` | `mongodb://localhost:27017` |
+| `mongo.database` | `GEOSEARCH_MONGO__DATABASE` | `geosearch` |
+| `mongo.server_selection_timeout_ms` | `GEOSEARCH_MONGO__SERVER_SELECTION_TIMEOUT_MS` | `2000` |
+| `registry.seeds_dir` | `GEOSEARCH_REGISTRY__SEEDS_DIR` | `registry/seeds` |
+| `registry.seed_demo` | `GEOSEARCH_REGISTRY__SEED_DEMO` | `false` |
+| `registry.max_inline_result_chars` | `GEOSEARCH_REGISTRY__MAX_INLINE_RESULT_CHARS` | `1500` |
+| `registry.required` | `GEOSEARCH_REGISTRY__REQUIRED` | `true` |
+| `registry.strict_startup` | `GEOSEARCH_REGISTRY__STRICT_STARTUP` | `true` |
 
 For example, to buffer Points with a 1000 m radius instead of the default:
 

@@ -39,6 +39,22 @@ Responsibility split, which guides every design choice:
 12. **Tests never need a GPU or a running model** — except `scripts/smoke_model.py`
     and the eval harness. Everything in `pytest` uses `tests/scripted_model.py`.
 
+### Stage 3 invariants (registry)
+
+13. **Allowlist.** A registry definition runs only if its `source_id` has a
+    handler registered in code (`registry/handlers.py`). Every stored
+    `source_id` must have a handler: seeding refuses unknown ones, and startup
+    fails on them (`registry.strict_startup`, else they are logged and skipped).
+14. **No area inputs.** Handler input models never contain `area_id`, `wkt` or
+    `geometry` (nor `runtime`, the injection name); registration rejects them.
+    The resolver injects `area_id` from agent state for `uses_area=True` handlers.
+15. **Result size.** A registry tool's inline result is at most
+    `registry.max_inline_result_chars`; artifacts and oversized `data` go to
+    working-memory files under `/turns/<turn>/results/<capability>/<k>.json`.
+16. **No MongoDB in old tests.** Stage 1–2 tests never need MongoDB: they pass
+    an `InMemoryRegistry` to `create_app(..., tool_registry=...)`. MongoDB
+    tests use the `mongo_db` fixture and skip when the server is down.
+
 ## Verified library APIs (Stage 2, pinned versions)
 
 Pinned: `deepagents==0.7.21`, `langchain==1.4.3`, `langgraph==1.2.12`,
@@ -69,11 +85,67 @@ these; re-verify on upgrade:
   prompt reported identical `input_tokens`. The ledger's truncation check is still
   conservative (warn-only, first call of the turn) in case other servers differ.
 
+## Verified library APIs (Stage 3)
+
+Pinned: `pymongo==4.18.2`. Confirmed against it and the Stage 2 pins:
+
+- **Runtime-built tools**: `StructuredTool(name=..., description=..., args_schema=<dict>,
+  func=...)` exposes the dict schema unchanged (`convert_to_openai_tool`), but
+  passes arguments through **unvalidated** — the resolver validates them with the
+  handler's input model itself.
+- **ToolRuntime injection** in a runtime-built tool: `ToolNode` reads the
+  function's signature, so a parameter named `runtime` is injected even with a
+  dict `args_schema`, and never appears in the schema.
+- **Command + ToolMessage**: a tool may return
+  `Command(update={"messages": [ToolMessage(..., tool_call_id=runtime.tool_call_id)],
+  "files": {...}})`; the call id comes from `runtime.tool_call_id`.
+- **PyMongo**: `find_one_and_update(filter, update, upsert=True,
+  return_document=ReturnDocument.AFTER)`. An anchored `_id` regex (`^demo\.`)
+  is an `IXSCAN` on the `_id` index (asserted via `explain()` in the tests).
+  Idempotent upsert = `update_one({_id, description: {$ne: d}}, ..., upsert=True)`;
+  a `DuplicateKeyError` there means "unchanged".
+
+## How to add a tool
+
+No change under `agent/`. Two pieces:
+
+1. **Handler module** in `src/geosearch/capabilities/<capability>.py`, added to
+   `MODULES` in `capabilities/__init__.py` (explicit list, no auto-discovery):
+
+   ```python
+   class FindInput(BaseModel):          # flat; no area_id/wkt/geometry/runtime
+       query: str = Field(description="What to look for.")
+
+   class PlaceRow(BaseModel):           # flat; one result row
+       name: str
+       lon: float
+       lat: float
+
+   @register_handler("places.search", input_model=FindInput,
+                     output_model=PlaceRow, uses_area=True)
+   def search(args: FindInput, ctx: HandlerContext) -> ToolResult:
+       rows = ...                       # ctx.area_id, ctx.area_ops, ctx.cfg, ctx.turn
+       return ToolResult(summary=f"Found {len(rows)} places.",
+                         data={"count": len(rows)}, artifact=rows)
+   ```
+
+   If `artifact` is a list, every row must match `output_model` exactly;
+   otherwise non-empty `data` must. A mismatch is an error to the model.
+2. **Seed entry** in `registry/seeds/<capability>.yaml` (description ≤ 200 chars,
+   model-facing), then `uv run geosearch-registry seed`. The running app picks
+   it up on the next request (revision check).
+
+Check drift with `uv run geosearch-registry validate`; `seed --prune` removes
+tools that are in no seed file; `delete <source_id>` removes one.
+
 ## Conventions
 
 - Python 3.12, managed with `uv`. Run `uv run pytest` and `uv run ruff check .`
   before considering any step done. The eval harness runs separately against the
   real model: `uv run python -m evals.run --suite stage2`.
+- MongoDB (tool registry, Stage 3) runs via `docker compose up -d`; registry
+  tests skip without it. The app is started with
+  `uv run uvicorn --factory geosearch.api.app:create_app` (no module-level `app`).
 - `src/` layout. Type hints everywhere.
 - Config via `pydantic-settings`, env prefix `GEOSEARCH_`, nested delimiter
   `__` (e.g. `GEOSEARCH_POINT_BUFFER__DEFAULT_RADIUS_M=1000`). Config is

@@ -57,7 +57,7 @@ Who owns what:
 ┌───────────────────────────────┐                   │
 │ Capability registry       S3  │                   │
 │ registry/ · MongoDB           │                   │
-│ definitions, schemas, status  │                   │
+│ definitions: source_id + desc │                   │
 │ resolver -> handler allowlist │                   │
 └───────────────┬───────────────┘                   │
                 ▼                                   │
@@ -116,7 +116,7 @@ The model sees `area_id` plus a compact summary, never the WKT. Area tools take 
 
 Gate: token ledger live, baseline and trimmed harness cost recorded, multi-turn evals within budget.
 
-### Stage 3 — Capability registry · next
+### Stage 3 — Capability registry · done
 
 A minimal tool registry on MongoDB, run with Docker Compose for dev and tests:
 
@@ -127,9 +127,9 @@ A minimal tool registry on MongoDB, run with Docker Compose for dev and tests:
 - **Big results:** the resolver writes them to working-memory files; the model gets a short summary plus the path.
 - **Seeding and change detection:** YAML seed files, an idempotent `geosearch-registry` CLI (`seed`, `validate`, `list`, `delete`), and a revision counter checked per request.
 
-Gate: registry tests pass on real MongoDB; adding a tool takes a handler module and a seed entry, with no change under `agent/`.
+Gate: registry tests pass on real MongoDB; adding a tool takes a handler module and a seed entry, with no change under `agent/`. **Met** — the registry tests pass on MongoDB 8 and skip cleanly without it; the Stage 1–2 suite needs no MongoDB; `demo.sample_points` was added with zero edits under `agent/`. The agent does not get registry tools yet (Stage 4); the resolved catalog lives on `app.state.catalog`.
 
-### Stage 4 — Progressive disclosure · planned
+### Stage 4 — Progressive disclosure · next
 
 Keeps unused tool schemas out of the model's context:
 
