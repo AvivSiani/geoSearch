@@ -1,0 +1,68 @@
+# Stage 4 eval cases: progressive disclosure on the real model.
+# The registry is seeded (in a throwaway `geosearch_eval` DB) with the demo tool
+# (9001) and the ten scale fakes (101-110). `expect_loaded` is the set of tools a
+# turn should load; it drives the loaded_exactly check and the selection
+# precision/recall in the report.
+name: stage4
+registry: scale
+wkt: "POLYGON((34.75 32.05, 34.80 32.05, 34.80 32.10, 34.75 32.10, 34.75 32.05))"
+
+cases:
+  - name: random_points
+    turns:
+      - prompt: "Give me 5 random points in this area"
+        expect_loaded: [9001]
+        checks:
+          - type: loaded_exactly
+            ids: [9001]
+          - type: tool_called
+            tool: source_9001
+          - type: tool_result_contains
+            tool: source_9001
+            text: "Sampled 5 random point(s)"
+          - type: no_unoffered_tool_calls
+
+  - name: points_and_weather
+    turns:
+      - prompt: "Random points here, and what's the weather?"
+        expect_loaded: [9001, 101]
+        checks:
+          - type: loaded_exactly
+            ids: [9001, 101]
+          - type: no_unoffered_tool_calls
+
+  - name: area_size_loads_nothing
+    turns:
+      - prompt: "How big is this area?"
+        expect_loaded: []
+        checks:
+          - type: loaded_exactly
+            ids: []
+          - type: tool_called
+            tool: geo_describe_area
+
+  - name: restaurant_cant
+    turns:
+      - prompt: "Find me a good restaurant here"
+        expect_loaded: []
+        checks:
+          - type: loaded_exactly
+            ids: []
+          - type: answer_contains_cant_do
+
+  - name: follow_up_no_reload
+    turns:
+      - prompt: "Give me 5 random points in this area"
+        expect_loaded: [9001]
+        checks:
+          - type: tool_called
+            tool: source_9001
+      - prompt: "Now 3 more with seed 2"
+        expect_loaded: []
+        checks:
+          - type: no_reload
+          - type: tool_called
+            tool: source_9001
+          - type: tool_result_contains
+            tool: source_9001
+            text: "Sampled 3 random point(s) inside the area (seed 2)"

@@ -22,8 +22,13 @@ from langchain_core.messages.utils import count_tokens_approximately
 
 from geosearch.registry.catalog import CatalogSnapshot
 
+# Named-argument form on purpose: with the positional `load_tools([ids])` hint,
+# gemma4 on Ollama 0.35.1 (thinking off) copies it, and a multi-id call such as
+# `load_tools([9001, 101])` is dropped by Ollama's tool-call parser, leaving an
+# empty reply. Verified with a captured request replayed against the server.
 CATALOG_HEADER = (
-    "Tools (call load_tools([ids]) with every tool the request needs, then use them):"
+    "Tools (call load_tools with source_ids=[id, ...] for every tool the request needs, "
+    "then use them):"
 )
 NO_TOOLS = "No tools available."
 

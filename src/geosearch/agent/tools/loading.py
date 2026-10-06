@@ -32,7 +32,7 @@ def make_load_tools(snapshot: CatalogSnapshot) -> BaseTool:
         source_ids: list[int], runtime: ToolRuntime[AgentContext, GeoAgentState]
     ) -> Command:
         """Load the tools the request needs, chosen by their catalog descriptions.
-        Pass every needed id in one call, e.g. load_tools([17, 9001])."""
+        Pass every needed id in one call, e.g. source_ids=[17, 9001]."""
         cap = runtime.context.cfg.disclosure.max_loaded_tools
         already = [i for i in runtime.state.get("loaded_tools") or [] if i in descriptions]
 
