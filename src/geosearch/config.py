@@ -191,6 +191,25 @@ class RegistryConfig(BaseModel):
         return self
 
 
+class DisclosureConfig(BaseModel):
+    """Progressive disclosure of registry tools (Stage 4)."""
+
+    max_loaded_tools: int | None = None  # None = no cap; the ledger's over_budget is the signal
+    catalog_warn_tokens: int = 600  # the ledger flags a catalog block larger than this
+
+    @model_validator(mode="after")
+    def _check_bounds(self) -> "DisclosureConfig":
+        if self.max_loaded_tools is not None and self.max_loaded_tools < 1:
+            raise ValueError(
+                f"disclosure.max_loaded_tools must be >= 1 or unset, got {self.max_loaded_tools}"
+            )
+        if self.catalog_warn_tokens <= 0:
+            raise ValueError(
+                f"disclosure.catalog_warn_tokens must be > 0, got {self.catalog_warn_tokens}"
+            )
+        return self
+
+
 class GeoConfig(BaseSettings):
     """Root config. Env prefix GEOSEARCH_, nested delimiter __.
 
@@ -208,3 +227,4 @@ class GeoConfig(BaseSettings):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mongo: MongoConfig = Field(default_factory=MongoConfig)
     registry: RegistryConfig = Field(default_factory=RegistryConfig)
+    disclosure: DisclosureConfig = Field(default_factory=DisclosureConfig)

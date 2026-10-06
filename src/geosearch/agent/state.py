@@ -2,7 +2,7 @@
 
 Why one shared schema rather than per-middleware state: these fields are how
 later stages' tools and middleware communicate (intent in Stage 5, loaded
-capabilities in Stage 4, search progress in Stage 6). Keeping them in one place
+tools in Stage 4, search progress in Stage 6). Keeping them in one place
 makes the contract explicit. A field only one middleware needs can still live
 in that middleware; these are the shared ones.
 
@@ -12,9 +12,21 @@ Crucially, area geometry is NOT here: the model-visible state carries only an
 The one WKT field is server-side only and never placed in a message.
 """
 
-from typing import TypedDict
+from typing import Annotated, TypedDict
 
 from deepagents import DeepAgentState
+
+
+def merge_loaded_tools(left: list[int] | None, right: list[int] | None) -> list[int]:
+    """Union, keeping first-load order. A reducer rather than a plain field so
+    two `load_tools` calls in the same step both land (a plain field would make
+    LangGraph reject the second write), and so a turn's `[]` initial value
+    never wipes what earlier turns loaded. There is no unloading (Stage 4)."""
+    merged = list(left or [])
+    for source_id in right or []:
+        if source_id not in merged:
+            merged.append(source_id)
+    return merged
 
 
 class ConversationRef(TypedDict):
@@ -35,7 +47,7 @@ class RequestRef(TypedDict):
 
 
 class SearchProgress(TypedDict):
-    """Capability-search progress. Reset each turn; "idle" until Stage 6 uses it."""
+    """Search progress. Reset each turn; "idle" until Stage 6 uses it."""
 
     iteration: int
     candidate_count: int
@@ -45,12 +57,12 @@ class SearchProgress(TypedDict):
 class GeoAgentState(DeepAgentState):
     """DeepAgentState (messages, files, todos, ...) plus our shared fields.
 
-    `conversation` and `loaded_capabilities` and `intent` carry across turns via
+    `conversation`, `loaded_tools` and `intent` carry across turns via
     the checkpointer; `request` and `search` are overwritten each turn.
     """
 
     conversation: ConversationRef
     request: RequestRef
     intent: dict | None  # Stage 5 fills it; carries across turns
-    loaded_capabilities: list[str]  # Stage 4 fills it; carries across turns
+    loaded_tools: Annotated[list[int], merge_loaded_tools]  # registry ids; carries across turns
     search: SearchProgress

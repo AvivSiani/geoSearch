@@ -64,7 +64,7 @@ def build_new_turn_state(
 ) -> dict[str, Any]:
     """The state update for a turn: the user's prompt plus fresh `request` and
     `search`. `conversation` carries the fixed area; `intent` and
-    `loaded_capabilities` are left for the checkpointer to persist across turns."""
+    `loaded_tools` are left for the checkpointer to persist across turns."""
     return {
         "messages": [{"role": "user", "content": prompt}],
         "conversation": {
@@ -176,7 +176,7 @@ class RequestRunner:
             # The only turn that seeds the carry-across fields; later turns inherit
             # them from the checkpointer.
             state["intent"] = None
-            state["loaded_capabilities"] = []
+            state["loaded_tools"] = []
             return invoke_turn(self.agent, self._context(), state, thread_id=conversation_id)
 
     def _follow_up(self, req: UserRequest) -> TurnOutcome:
