@@ -54,6 +54,8 @@ class UsageSummary(BaseModel):
     output_tokens: int
     peak_input_tokens: int
     over_budget: bool
+    summarizer_calls: int = 0  # Stage 5: not counted in model_calls/input_tokens above
+    summarizer_input_tokens: int = 0
 
 
 class AgentResponse(BaseModel):

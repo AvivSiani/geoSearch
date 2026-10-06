@@ -14,8 +14,10 @@ middleware hides each one until `load_tools` loads it, and blocks calls to it
 until then. The snapshot is fixed per built agent; AgentHolder rebuilds the
 agent when the registry revision changes.
 
-Our middleware order: area summary -> catalog -> disclosure -> call limit ->
-allowlist -> ledger (last).
+Our middleware order: area summary -> catalog -> disclosure -> summarizer ->
+call limit -> allowlist -> ledger (last). The summarizer sits inside disclosure
+on tool calls, so a blocked (unloaded) call never reaches it, and it rewrites a
+registry result's rows into a cited summary before the message enters state.
 
 Middleware ordering note for deepagents 0.7.21: user middleware whose `.name`
 matches a base-stack middleware *replaces it in place* (so our FilesystemMiddleware
@@ -49,6 +51,7 @@ from geosearch.agent.ledger import TokenLedgerMiddleware
 from geosearch.agent.middleware import AreaSummaryMiddleware, ToolAllowlistMiddleware
 from geosearch.agent.prompts import SYSTEM_PROMPT
 from geosearch.agent.state import GeoAgentState
+from geosearch.agent.summarizer import ResultSummarizer, SummarizerMiddleware
 from geosearch.agent.tools import geo_describe_area
 from geosearch.agent.tools.loading import make_load_tools
 from geosearch.config import GeoConfig
@@ -64,16 +67,21 @@ def build_agent(
     model: BaseChatModel,
     checkpointer: BaseCheckpointSaver | None = None,
     catalog: CatalogSnapshot | None = None,
+    summarizer_model: BaseChatModel | None = None,
 ) -> CompiledStateGraph:
     """Build the agent (at startup, on a registry change, or per test). The
     model, checkpointer and catalog are injected so tests can supply a scripted
     model, an in-memory saver and a fake registry's snapshot. No catalog means
-    an empty one: the agent then has only its core tools."""
+    an empty one: the agent then has only its core tools. The summarizer runs
+    on `model` unless a separate `summarizer_model` is given (tests script the
+    two apart)."""
     catalog = catalog or CatalogSnapshot()
+    summarizer = ResultSummarizer(summarizer_model or model, cfg)
     middleware: list[AgentMiddleware] = [
         AreaSummaryMiddleware(),
         CatalogMiddleware(catalog),
         DisclosureMiddleware(catalog),
+        SummarizerMiddleware(summarizer, catalog),
     ]
 
     if cfg.agent.harness == "trimmed":

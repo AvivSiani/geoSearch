@@ -56,7 +56,8 @@ def _runner(
     store = InMemoryAreaStore(max_entries=cfg.area_store.max_entries)
     checkpointer = make_checkpointer(cfg)
     model = ScriptedChatModel(responses=responses)
-    agents = AgentHolder(cfg, model, checkpointer, scale_catalog(registry))
+    summarizer = ScriptedChatModel(responses=[ai("Summary.")])  # keeps the script apart
+    agents = AgentHolder(cfg, model, checkpointer, scale_catalog(registry), summarizer)
     runner = RecordingRunner(
         cfg,
         agents,

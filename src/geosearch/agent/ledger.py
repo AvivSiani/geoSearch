@@ -41,6 +41,7 @@ class LedgerRecord:
     est_catalog_tokens: int = 0  # the catalog block, part of est_system_tokens
     catalog_over_warn: bool = False  # catalog block > disclosure.catalog_warn_tokens
     est_registry_tool_tokens: int = 0  # loaded registry schemas, part of est_tool_tokens
+    role: str = "agent"  # "agent" (main loop) or "summarizer" (Stage 5)
 
     @property
     def effective_input(self) -> int:
@@ -52,15 +53,23 @@ class LedgerRecord:
 
 @dataclass
 class TokenLedger:
-    """Fresh per turn; lives on AgentContext, never persisted or shown to the model."""
+    """Fresh per turn; lives on AgentContext, never persisted or shown to the model.
+
+    Summarizer calls (Stage 5) are kept apart from the main agent's, so the
+    agent's budget numbers stay comparable with earlier stages; the summary
+    reports them in their own fields."""
 
     records: list[LedgerRecord] = field(default_factory=list)
+    summarizer_records: list[LedgerRecord] = field(default_factory=list)
     # Set by the disclosure middleware just before the call they describe.
     pending_catalog_tokens: int = 0
     pending_registry_tool_names: frozenset[str] = frozenset()
 
     def add(self, record: LedgerRecord) -> None:
         self.records.append(record)
+
+    def add_summarizer(self, record: LedgerRecord) -> None:
+        self.summarizer_records.append(record)
 
     def note_catalog(self, tokens: int) -> None:
         self.pending_catalog_tokens = tokens
@@ -74,7 +83,9 @@ class TokenLedger:
             input_tokens=sum(r.effective_input for r in self.records),
             output_tokens=sum(r.reported_output_tokens or 0 for r in self.records),
             peak_input_tokens=max((r.effective_input for r in self.records), default=0),
-            over_budget=any(r.over_budget for r in self.records),
+            over_budget=any(r.over_budget for r in [*self.records, *self.summarizer_records]),
+            summarizer_calls=len(self.summarizer_records),
+            summarizer_input_tokens=sum(r.effective_input for r in self.summarizer_records),
         )
 
 

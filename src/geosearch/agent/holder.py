@@ -33,9 +33,11 @@ class AgentHolder:
         model: BaseChatModel,
         checkpointer: BaseCheckpointSaver | None,
         catalog: CatalogCache | None = None,
+        summarizer_model: BaseChatModel | None = None,
     ):
         self._cfg = cfg
         self._model = model
+        self._summarizer_model = summarizer_model
         self._checkpointer = checkpointer
         self._catalog = catalog
         self._lock = threading.Lock()
@@ -43,7 +45,9 @@ class AgentHolder:
         self._agent = self._build(self._snapshot)
 
     def _build(self, snapshot: CatalogSnapshot) -> CompiledStateGraph:
-        return build_agent(self._cfg, self._model, self._checkpointer, snapshot)
+        return build_agent(
+            self._cfg, self._model, self._checkpointer, snapshot, self._summarizer_model
+        )
 
     @property
     def snapshot(self) -> CatalogSnapshot:
