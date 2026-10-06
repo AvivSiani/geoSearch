@@ -1,4 +1,4 @@
-"""Handler modules for registry tools (Stage 3+).
+"""Handler modules for registry tools (Stage 3+), one handler per `source_id`.
 
 Each module registers its handlers on import via `register_handler`. The list
 is explicit — no auto-discovery — so the handler allowlist is exactly what is
@@ -7,7 +7,7 @@ written here and reviewable in one place.
 
 import importlib
 
-MODULES: tuple[str, ...] = ("geosearch.capabilities.demo",)
+MODULES: tuple[str, ...] = ("geosearch.sources.demo",)
 
 
 def load_all() -> None:

@@ -32,14 +32,14 @@ uv run ruff check .
 
 ## Tool registry
 
-Tool definitions (a `source_id` and a description) live in MongoDB; handler
-code lives in `src/geosearch/capabilities/`. Manage definitions with:
+Tool definitions (an integer `source_id` and a description) live in MongoDB; handler
+code lives in `src/geosearch/sources/` (one handler per numeric `source_id`). Manage definitions with:
 
 ```bash
 uv run geosearch-registry seed [PATHS] [--include-demo] [--prune]
 uv run geosearch-registry validate      # exit 1 on seed/DB drift
 uv run geosearch-registry list
-uv run geosearch-registry delete <source_id>
+uv run geosearch-registry delete <source_id>   # an integer id
 ```
 
 Exit codes: 0 ok, 1 validation problems, 2 usage or connection error. See

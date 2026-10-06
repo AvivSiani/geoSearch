@@ -10,7 +10,7 @@ Two policies, both from config:
 
 import logging
 
-from geosearch import capabilities
+from geosearch import sources
 from geosearch.config import GeoConfig
 from geosearch.registry.catalog import CatalogCache
 from geosearch.registry.mongo import connect, database, ping
@@ -27,7 +27,7 @@ class RegistryUnavailable(RuntimeError):
 def open_catalog(cfg: GeoConfig, registry: Registry | None = None) -> CatalogCache:
     """Load the handler allowlist, connect (unless a registry is injected, as
     the Mongo-free tests do), run the startup check, and build the catalog."""
-    capabilities.load_all()
+    sources.load_all()
     if registry is None:
         client = connect(cfg.mongo)
         registry = MongoRegistry(database(client, cfg.mongo))

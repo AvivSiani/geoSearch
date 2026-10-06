@@ -18,15 +18,14 @@ from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-from geosearch import capabilities
+from geosearch import sources
 from geosearch.agent.context import AgentContext
 from geosearch.config import GeoConfig
 from geosearch.geo.area_store import InMemoryAreaStore
 from geosearch.geo.ops import AreaOps
 from geosearch.registry.handlers import HandlerContext, HandlerRegistry, ToolResult, UnknownHandler
 from geosearch.registry.models import ToolDefinition
-from geosearch.registry.resolver import TRUNCATED, resolve, resolve_capability
-from geosearch.registry.store import InMemoryRegistry
+from geosearch.registry.resolver import TRUNCATED, resolve
 
 
 class Kind(StrEnum):
@@ -52,14 +51,14 @@ SEEN: dict[str, Any] = {}
 def _make_handlers(result: Any = None, raises: Exception | None = None) -> HandlerRegistry:
     reg = HandlerRegistry()
 
-    @reg.register("x.find", input_model=FindInput, output_model=Row, uses_area=True)
+    @reg.register(source_id=17, input_model=FindInput, output_model=Row, uses_area=True)
     def find(args: FindInput, ctx: HandlerContext) -> ToolResult:
         SEEN["args"], SEEN["ctx"] = args, ctx
         if raises:
             raise raises
         return result
 
-    @reg.register("x.noarea", input_model=FindInput, output_model=Row)
+    @reg.register(source_id=18, input_model=FindInput, output_model=Row)
     def noarea(args: FindInput, ctx: HandlerContext) -> ToolResult:
         SEEN["ctx"] = ctx
         return ToolResult(summary="ok", data={"name": "a", "score": 1.0})
@@ -67,7 +66,7 @@ def _make_handlers(result: Any = None, raises: Exception | None = None) -> Handl
     return reg
 
 
-TD = ToolDefinition(source_id="x.find", description="Find things in the area.")
+TD = ToolDefinition(source_id=17, description="Find things in the area.")
 
 
 @pytest.fixture
@@ -110,7 +109,7 @@ def _content(out: Command | ToolMessage) -> str:
 def test_model_facing_schema() -> None:
     tool = resolve(TD, _make_handlers())
     fn = convert_to_openai_tool(tool)["function"]
-    assert fn["name"] == "x_find"
+    assert fn["name"] == "source_17"
     assert fn["description"] == "Find things in the area."
     params = fn["parameters"]
     assert set(params["properties"]) == {"kind", "limit", "tags", "near"}
@@ -127,18 +126,9 @@ def test_model_facing_schema() -> None:
 
 
 def test_unknown_handler_is_not_resolved() -> None:
-    td = ToolDefinition(source_id="x.missing", description="d")
-    with pytest.raises(UnknownHandler, match="x.missing"):
+    td = ToolDefinition(source_id=99, description="d")
+    with pytest.raises(UnknownHandler, match="99"):
         resolve(td, _make_handlers())
-
-
-def test_resolve_capability_skips_tools_without_handler() -> None:
-    registry = InMemoryRegistry(
-        [TD, ToolDefinition(source_id="x.missing", description="d"),
-         ToolDefinition(source_id="y.other", description="d")]
-    )  # fmt: skip
-    tools = resolve_capability(registry, "x", _make_handlers())
-    assert [t.name for t in tools] == ["x_find"]
 
 
 # --- context ----------------------------------------------------------------------
@@ -149,14 +139,14 @@ def test_area_and_turn_come_from_state(setup: tuple) -> None:
     out = _call(tool, setup, kind="cafe")
     ctx: HandlerContext = SEEN["ctx"]
     assert ctx.area_id == setup[1]["conversation"]["area_id"]
-    assert ctx.turn == 2 and ctx.capability == "x"
+    assert ctx.turn == 2 and ctx.source_id == 17
     assert ctx.area_ops is setup[0].area_ops and ctx.cfg is setup[0].cfg
     assert SEEN["args"] == FindInput(kind=Kind.cafe)
     assert _content(out) == "none found"
 
 
 def test_tools_without_uses_area_get_no_area(setup: tuple) -> None:
-    td = ToolDefinition(source_id="x.noarea", description="d")
+    td = ToolDefinition(source_id=18, description="d")
     _call(resolve(td, _make_handlers()), setup, kind="park")
     assert SEEN["ctx"].area_id is None
 
@@ -173,22 +163,22 @@ def test_through_a_real_toolnode(setup: tuple) -> None:
         files: Annotated[dict, merge]
         conversation: dict
 
-    capabilities.load_all()
-    tool = resolve(ToolDefinition(source_id="demo.sample_points", description="Points."))
+    sources.load_all()
+    tool = resolve(ToolDefinition(source_id=9001, description="Points."))
     graph = StateGraph(S, context_schema=AgentContext)
     graph.add_node("tools", ToolNode([tool]))
     graph.add_edge(START, "tools")
     graph.add_edge("tools", END)
     context, state = setup
 
-    call = {"name": "demo_sample_points", "args": {"count": 4}, "id": "c9", "type": "tool_call"}
+    call = {"name": "source_9001", "args": {"count": 4}, "id": "c9", "type": "tool_call"}
     out = graph.compile().invoke(
         {"messages": [AIMessage("", tool_calls=[call])], "files": {}, **state}, context=context
     )
     message = out["messages"][-1]
     assert message.tool_call_id == "c9"
-    assert "full result: /turns/2/results/demo/1.json" in message.content
-    rows = json.loads(out["files"]["/turns/2/results/demo/1.json"]["content"])
+    assert "full result: /turns/2/results/9001/1.json" in message.content
+    rows = json.loads(out["files"]["/turns/2/results/9001/1.json"]["content"])
     assert len(rows) == 4
     area_id = state["conversation"]["area_id"]
     assert all(context.area_ops.contains(area_id, r["lon"], r["lat"]) for r in rows)
@@ -213,7 +203,7 @@ def test_handler_exception_becomes_a_short_error(setup: tuple) -> None:
         resolve(TD, _make_handlers(raises=RuntimeError("secret internals"))), setup, kind="cafe"
     )
     assert isinstance(out, ToolMessage) and out.status == "error"
-    assert out.content == "Error: x_find failed (RuntimeError)"
+    assert out.content == "Error: source_17 failed (RuntimeError)"
     assert "Traceback" not in out.content and "secret" not in out.content
 
 
@@ -244,7 +234,7 @@ def test_output_mismatch_becomes_an_error(
 ) -> None:
     out = _call(resolve(TD, _make_handlers(result)), setup, kind="cafe")
     assert isinstance(out, ToolMessage) and out.status == "error"
-    assert out.content == "Error: x_find returned malformed output (name, score)"
+    assert out.content == "Error: source_17 returned malformed output (name, score)"
     assert "does not match" in caplog.text
 
 
@@ -256,7 +246,7 @@ def test_artifact_goes_to_a_file_with_a_pointer(setup: tuple) -> None:
     result = ToolResult(summary="Found 3.", data={"name": "n0", "score": 0.0}, artifact=rows)
     out = _call(resolve(TD, _make_handlers(result)), setup, kind="cafe")
     assert isinstance(out, Command)
-    path = "/turns/2/results/x/1.json"
+    path = "/turns/2/results/17/1.json"
     assert _content(out) == f'Found 3.\ndata: {{"name":"n0","score":0.0}}\nfull result: {path}'
     file = out.update["files"][path]
     assert json.loads(file["content"]) == rows
@@ -265,10 +255,10 @@ def test_artifact_goes_to_a_file_with_a_pointer(setup: tuple) -> None:
 
 def test_next_free_k_skips_existing_files(setup: tuple) -> None:
     context, state = setup
-    state = {**state, "files": {"/turns/2/results/x/1.json": {}, "/turns/2/results/x/2.json": {}}}
+    state = {**state, "files": {"/turns/2/results/17/1.json": {}, "/turns/2/results/17/2.json": {}}}
     result = ToolResult(summary="s", artifact=[{"name": "a", "score": 1.0}])
     out = resolve(TD, _make_handlers(result)).func(runtime=_runtime(state, context), kind="cafe")
-    assert list(out.update["files"]) == ["/turns/2/results/x/3.json"]
+    assert list(out.update["files"]) == ["/turns/2/results/17/3.json"]
 
 
 def test_parallel_calls_in_one_step_get_distinct_files(setup: tuple) -> None:
@@ -292,8 +282,8 @@ def test_oversized_data_is_offloaded_automatically(setup: tuple) -> None:
     result = ToolResult(summary="Big.", data={"name": "n" * 2_000, "score": 1.0})
     out = _call(resolve(TD, _make_handlers(result)), setup, kind="cafe")
     content = _content(out)
-    assert content == "Big.\nfull result: /turns/2/results/x/1.json"
-    stored = json.loads(out.update["files"]["/turns/2/results/x/1.json"]["content"])
+    assert content == "Big.\nfull result: /turns/2/results/17/1.json"
+    stored = json.loads(out.update["files"]["/turns/2/results/17/1.json"]["content"])
     assert stored["name"] == "n" * 2_000
 
 
@@ -302,7 +292,7 @@ def test_long_summary_is_truncated_within_the_limit(setup: tuple) -> None:
     result = ToolResult(summary="s" * 5_000, artifact=[{"name": "a", "score": 1.0}])
     content = _content(_call(resolve(TD, _make_handlers(result)), setup, kind="cafe"))
     assert len(content) <= limit
-    assert TRUNCATED + "\nfull result: /turns/2/results/x/1.json" in content
+    assert TRUNCATED + "\nfull result: /turns/2/results/17/1.json" in content
 
 
 def test_data_too_big_alongside_artifact_gets_its_own_file(setup: tuple) -> None:
@@ -316,6 +306,6 @@ def test_data_too_big_alongside_artifact_gets_its_own_file(setup: tuple) -> None
     content = _content(out)
     assert len(content) <= limit
     assert content == (
-        "Both.\ndata: /turns/2/results/x/2.json\nfull result: /turns/2/results/x/1.json"
+        "Both.\ndata: /turns/2/results/17/2.json\nfull result: /turns/2/results/17/1.json"
     )
     assert len(out.update["files"]) == 2

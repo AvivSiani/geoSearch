@@ -1,10 +1,9 @@
 """Registry storage: tool definitions plus a revision counter.
 
 Two collections:
-  - `tools`: one document per tool, `{_id: source_id, description}` and nothing
-    else. A capability's tools are found with an anchored prefix regex on `_id`,
-    which MongoDB answers from the `_id` index (an index-bounds scan, not a
-    collection scan — asserted in the tests via explain()).
+  - `tools`: one document per tool, `{_id: <source_id int>, description}` and
+    nothing else. There is no grouping, so the only queries are "all tools"
+    (sorted by id) and "one tool by id".
   - `registry_meta`: one document `{_id: "registry", revision, updated_at}`.
 
 Why a revision counter: the app checks it once per request (one tiny read)
@@ -12,7 +11,6 @@ and rebuilds its tool catalog only when it changed, instead of re-reading every
 definition on every request. Every real change bumps it; a no-op does not.
 """
 
-import re
 import threading
 from datetime import UTC, datetime
 from typing import Protocol
@@ -27,22 +25,17 @@ META_ID = "registry"
 
 
 class ToolNotFound(Exception):
-    def __init__(self, source_id: str):
-        super().__init__(f"tool {source_id!r} is not in the registry")
+    def __init__(self, source_id: int):
+        super().__init__(f"tool {source_id} is not in the registry")
         self.source_id = source_id
 
 
 class Registry(Protocol):
     def revision(self) -> int: ...
-    def list_capabilities(self) -> list[str]: ...
-    def get_tools(self, capability: str) -> list[ToolDefinition]: ...
-    def get_tool(self, source_id: str) -> ToolDefinition: ...
+    def list_tools(self) -> list[ToolDefinition]: ...  # sorted by source_id
+    def get_tool(self, source_id: int) -> ToolDefinition: ...
     def upsert_tool(self, td: ToolDefinition) -> bool: ...
-    def delete_tool(self, source_id: str) -> bool: ...
-
-
-def _capabilities(source_ids: list[str]) -> list[str]:
-    return sorted({source_id.split(".", 1)[0] for source_id in source_ids})
+    def delete_tool(self, source_id: int) -> bool: ...
 
 
 class MongoRegistry:
@@ -56,14 +49,10 @@ class MongoRegistry:
         doc = self._meta.find_one({"_id": META_ID}, {"revision": 1})
         return int(doc["revision"]) if doc else 0
 
-    def list_capabilities(self) -> list[str]:
-        return _capabilities([doc["_id"] for doc in self._tools.find({}, {"_id": 1})])
+    def list_tools(self) -> list[ToolDefinition]:
+        return [_to_definition(doc) for doc in self._tools.find({}).sort("_id", 1)]
 
-    def get_tools(self, capability: str) -> list[ToolDefinition]:
-        query = {"_id": {"$regex": f"^{re.escape(capability)}\\."}}
-        return [_to_definition(doc) for doc in self._tools.find(query).sort("_id", 1)]
-
-    def get_tool(self, source_id: str) -> ToolDefinition:
+    def get_tool(self, source_id: int) -> ToolDefinition:
         doc = self._tools.find_one({"_id": source_id})
         if doc is None:
             raise ToolNotFound(source_id)
@@ -85,7 +74,7 @@ class MongoRegistry:
         self._bump()
         return True
 
-    def delete_tool(self, source_id: str) -> bool:
+    def delete_tool(self, source_id: int) -> bool:
         if self._tools.delete_one({"_id": source_id}).deleted_count == 0:
             return False
         self._bump()
@@ -107,24 +96,20 @@ def _to_definition(doc: dict) -> ToolDefinition:
 
 class InMemoryRegistry:
     """Same contract without MongoDB: used by tests that exercise the resolver,
-    catalog and app wiring, and by the Stage 1-2 suite (invariant 4)."""
+    catalog, agent and app wiring, and by the Stage 1-2 suite (invariant 16)."""
 
     def __init__(self, tools: list[ToolDefinition] | None = None):
         self._lock = threading.Lock()
-        self._tools: dict[str, ToolDefinition] = {td.source_id: td for td in tools or []}
+        self._tools: dict[int, ToolDefinition] = {td.source_id: td for td in tools or []}
         self._revision = 0
 
     def revision(self) -> int:
         return self._revision
 
-    def list_capabilities(self) -> list[str]:
-        return _capabilities(list(self._tools))
+    def list_tools(self) -> list[ToolDefinition]:
+        return [self._tools[k] for k in sorted(self._tools)]
 
-    def get_tools(self, capability: str) -> list[ToolDefinition]:
-        prefix = f"{capability}."
-        return [self._tools[k] for k in sorted(self._tools) if k.startswith(prefix)]
-
-    def get_tool(self, source_id: str) -> ToolDefinition:
+    def get_tool(self, source_id: int) -> ToolDefinition:
         try:
             return self._tools[source_id]
         except KeyError:
@@ -138,7 +123,7 @@ class InMemoryRegistry:
             self._revision += 1
             return True
 
-    def delete_tool(self, source_id: str) -> bool:
+    def delete_tool(self, source_id: int) -> bool:
         with self._lock:
             if self._tools.pop(source_id, None) is None:
                 return False

@@ -2,7 +2,7 @@
 
 The resolved tool is the one place where registry data, handler code and agent
 runtime meet, so it carries the guarantees:
-  - The model sees `td.model_name`, `td.description` and a compacted schema built
+  - The model sees `source_<id>`, `td.description` and a compacted schema built
     from the handler's input model — nothing else. The runtime is injected via
     the `runtime` parameter name, which ToolNode fills and the schema never shows.
   - The area comes from agent state, never from arguments (invariant 2).
@@ -12,7 +12,7 @@ runtime meet, so it carries the guarantees:
   - The handler's output is checked against its declared `output_model`, so a
     declared field cannot silently disappear and an undeclared one cannot leak.
   - Inline results stay under `max_inline_result_chars` (invariant 3); bulk
-    results go to working-memory files under /turns/<turn>/results/<capability>/.
+    results go to working-memory files under /turns/<turn>/results/<source_id>/.
 """
 
 import json
@@ -31,13 +31,11 @@ from pydantic import BaseModel, ValidationError
 from geosearch.registry.handlers import (
     HandlerContext,
     HandlerRegistry,
-    HandlerSpec,
+    RegisteredHandler,
     ToolResult,
-    UnknownHandler,
     handlers,
 )
 from geosearch.registry.models import ToolDefinition
-from geosearch.registry.store import Registry
 
 log = logging.getLogger(__name__)
 
@@ -93,7 +91,7 @@ def _validation_summary(exc: ValidationError) -> str:
     return "; ".join(parts)
 
 
-def check_output(spec: HandlerSpec, result: ToolResult) -> str | None:
+def check_output(spec: RegisteredHandler, result: ToolResult) -> str | None:
     """None if the result matches the declared output model, else the reason.
     Rows (or `data`) must have exactly the declared fields: missing ones would
     silently disappear, extra ones would leak undeclared output to the model."""
@@ -128,11 +126,11 @@ class _FileNumbers:
         self._max_dirs = max_dirs
 
     def next(self, conversation_id: str, directory: str, files: dict[str, Any]) -> int:
-        prefix = f"{directory}/"
+        folder = f"{directory}/"
         used = [
             int(stem)
             for path in files
-            if path.startswith(prefix) and (stem := path[len(prefix) : -len(".json")]).isdigit()
+            if path.startswith(folder) and (stem := path[len(folder) : -len(".json")]).isdigit()
         ]
         with self._lock:
             key = (conversation_id, directory)
@@ -185,11 +183,11 @@ def _shape(
 # --- the tool ---------------------------------------------------------------------
 
 
-def _error(td: ToolDefinition, runtime: ToolRuntime, text: str) -> ToolMessage:
+def _error(name: str, runtime: ToolRuntime, text: str) -> ToolMessage:
     return ToolMessage(
         content=f"Error: {text}",
         tool_call_id=runtime.tool_call_id,
-        name=td.model_name,
+        name=name,
         status="error",
     )
 
@@ -198,17 +196,18 @@ def resolve(td: ToolDefinition, handler_registry: HandlerRegistry = handlers) ->
     """Raises UnknownHandler if `td.source_id` is not on the allowlist."""
     spec = handler_registry.get(td.source_id)
     schema = compact_schema(spec.input_model)
+    name = spec.model_name
 
     def run(runtime: ToolRuntime, **kwargs: Any) -> Command | ToolMessage:
         try:
             args = spec.input_model.model_validate(kwargs)
         except ValidationError as exc:
-            return _error(td, runtime, f"invalid arguments: {_validation_summary(exc)}")
+            return _error(name, runtime, f"invalid arguments: {_validation_summary(exc)}")
 
         conversation = runtime.state.get("conversation") or {}
         area_id = conversation.get("area_id") if spec.uses_area else None
         if spec.uses_area and not area_id:
-            return _error(td, runtime, "no area is bound to this conversation")
+            return _error(name, runtime, "no area is bound to this conversation")
         turn = int(conversation.get("turn", 0))
         cfg = runtime.context.cfg
         ctx = HandlerContext(
@@ -216,54 +215,39 @@ def resolve(td: ToolDefinition, handler_registry: HandlerRegistry = handlers) ->
             area_ops=runtime.context.area_ops,
             cfg=cfg,
             turn=turn,
-            capability=td.capability,
+            source_id=td.source_id,
         )
 
         try:
             result = spec.func(args, ctx)
         except Exception as exc:
             log.exception("registry tool %s raised", td.source_id)
-            return _error(td, runtime, f"{td.model_name} failed ({type(exc).__name__})")
+            return _error(name, runtime, f"{name} failed ({type(exc).__name__})")
 
         if problem := check_output(spec, result):
             log.error(
                 "registry tool %s: output does not match its model: %s", td.source_id, problem
             )
             fields = ", ".join(spec.output_fields)
-            return _error(td, runtime, f"{td.model_name} returned malformed output ({fields})")
+            return _error(name, runtime, f"{name} returned malformed output ({fields})")
 
         content, files = _shape(
             result,
             conversation_id=str(conversation.get("conversation_id", "")),
-            directory=f"/turns/{turn}/results/{td.capability}",
+            directory=f"/turns/{turn}/results/{td.source_id}",
             files=runtime.state.get("files") or {},
             limit=cfg.registry.max_inline_result_chars,
         )
-        message = ToolMessage(
-            content=content, tool_call_id=runtime.tool_call_id, name=td.model_name
-        )
+        message = ToolMessage(content=content, tool_call_id=runtime.tool_call_id, name=name)
         update: dict[str, Any] = {"messages": [message]}
         if files:
             update["files"] = files
         return Command(update=update)
 
     return StructuredTool(
-        name=td.model_name,
+        name=name,
         description=td.description,
         args_schema=schema,
         func=run,
     )
 
-
-def resolve_capability(
-    registry: Registry, capability: str, handler_registry: HandlerRegistry = handlers
-) -> list[BaseTool]:
-    """Tools without a handler are skipped with a warning; whether that should
-    stop the app is the startup check's decision (`strict_startup`), not ours."""
-    tools: list[BaseTool] = []
-    for td in registry.get_tools(capability):
-        try:
-            tools.append(resolve(td, handler_registry))
-        except UnknownHandler:
-            log.warning("registry: skipping %r: no handler registered", td.source_id)
-    return tools

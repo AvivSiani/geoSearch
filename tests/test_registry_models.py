@@ -1,38 +1,23 @@
-"""Stage 3 step 2: ToolDefinition validation."""
+"""ToolDefinition validation: a positive int source_id and a bounded description."""
 
 import pytest
 from pydantic import ValidationError
 
-from geosearch.registry.models import MAX_DESCRIPTION_CHARS, ToolDefinition
+from geosearch.registry.models import MAX_DESCRIPTION_CHARS, ToolDefinition, model_name_for
 
 
-def _td(source_id: str = "demo.sample_points", description: str = "Does it.") -> ToolDefinition:
+def _td(source_id: object = 9001, description: str = "Does it.") -> ToolDefinition:
     return ToolDefinition(source_id=source_id, description=description)
 
 
-def test_capability_and_model_name() -> None:
-    td = _td("places.search_nearby")
-    assert td.capability == "places"
-    assert td.model_name == "places_search_nearby"
+def test_model_name_is_generated_from_the_id() -> None:
+    assert model_name_for(17) == "source_17"
 
 
-@pytest.mark.parametrize(
-    "source_id",
-    ["demo", "Demo.points", "demo.Points", "demo.points.extra", "1demo.points", "demo.",
-     ".points", "demo-x.points", "demo.sample points", ""],
-)
-def test_invalid_source_ids_are_rejected(source_id: str) -> None:
+@pytest.mark.parametrize("source_id", [0, -1, "17", 1.5, True, None, "demo.sample_points"])
+def test_invalid_source_ids_are_rejected(source_id: object) -> None:
     with pytest.raises(ValidationError):
         _td(source_id)
-
-
-def test_source_id_allows_digits_and_underscores() -> None:
-    assert _td("geo_2.points_v2").model_name == "geo_2_points_v2"
-
-
-def test_model_name_length_is_bounded() -> None:
-    with pytest.raises(ValidationError):
-        _td("a" * 40 + "." + "b" * 40)
 
 
 def test_description_bounds() -> None:
@@ -45,8 +30,8 @@ def test_description_bounds() -> None:
 
 def test_only_source_id_and_description_are_accepted() -> None:
     with pytest.raises(ValidationError):
-        ToolDefinition(source_id="demo.x", description="d", version=2)
-    assert set(_td().model_dump()) == {"source_id", "description"}
+        ToolDefinition(source_id=1, description="d", name="x")
+    assert _td().model_dump() == {"source_id": 9001, "description": "Does it."}
 
 
 def test_definitions_are_immutable() -> None:

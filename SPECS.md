@@ -57,7 +57,7 @@ Who owns what:
 ┌───────────────────────────────┐                   │
 │ Capability registry       S3  │                   │
 │ registry/ · MongoDB           │                   │
-│ definitions: source_id + desc │                   │
+│ definitions, schemas, status  │                   │
 │ resolver -> handler allowlist │                   │
 └───────────────┬───────────────┘                   │
                 ▼                                   │
@@ -120,25 +120,27 @@ Gate: token ledger live, baseline and trimmed harness cost recorded, multi-turn 
 
 A minimal tool registry on MongoDB, run with Docker Compose for dev and tests:
 
-- **Definitions:** each tool is just a `source_id` (e.g. `demo.sample_points`) and a `description`. The `source_id` prefix is the capability. There are no cards, versions or status.
-- **Code owns the rest:** each handler's input model, output model (its returned fields) and `uses_area` flag live in the handler's registration. The database stores definitions, never code.
+- **Definitions:** each tool is just a numeric `source_id` and a `description`. There are no cards, versions or status.
+- **Code owns the rest:** each handler's registration declares the input model, the output model (its returned fields) and the `uses_area` flag. There is no grouping; the model sees each tool as `source_<id>` and selects tools from their descriptions alone, so descriptions must be clear and distinct. The database stores definitions, never code.
 - **Execution:** a resolver turns a definition into a LangChain tool through an explicit handler allowlist.
 - **Area injection:** the resolver injects `area_id` from agent state; tools never take it as an argument.
-- **Big results:** the resolver writes them to working-memory files; the model gets a short summary plus the path.
+- **Big results:** the resolver writes them to working-memory files (`/turns/<turn>/results/<source_id>/<k>.json`); the model gets a short summary plus the path.
 - **Seeding and change detection:** YAML seed files, an idempotent `geosearch-registry` CLI (`seed`, `validate`, `list`, `delete`), and a revision counter checked per request.
 
-Gate: registry tests pass on real MongoDB; adding a tool takes a handler module and a seed entry, with no change under `agent/`. **Met** — the registry tests pass on a real MongoDB (verified on 9.0.2) and skip cleanly without it; the Stage 1–2 suite needs no MongoDB; `demo.sample_points` was added with zero edits under `agent/`. The agent does not get registry tools yet (Stage 4); the resolved catalog lives on `app.state.catalog`.
+Gate: registry tests pass on real MongoDB; adding a tool takes a handler module and a seed entry, with no change under `agent/`.
 
 ### Stage 4 — Progressive disclosure · next
 
 Keeps unused tool schemas out of the model's context:
 
-- **Catalog:** an always-on catalog in the system prompt with capability prefixes and tool descriptions only. A tool's returned fields are shown when its capability is loaded.
-- **Loading:** `load_capability` adds the capability to `state.loaded_capabilities`.
-- **Filtering:** a `wrap_model_call` middleware shows the model only the tools of loaded capabilities.
-- **Guard:** calls to tools of unloaded capabilities are blocked.
+- **Catalog:** an always-on catalog in the system prompt with `id: description` lines only. Tools are not grouped.
+- **Selection:** the agent decides from the descriptions which tools the request needs, and calls `load_tools([ids])`. The result lists each loaded tool's returned fields.
+- **Carry-over:** loaded tools carry across turns. There is no count cap by default (it is configurable).
+- **Filtering:** a `wrap_model_call` middleware sends only the core tools plus the loaded tools.
+- **Guard:** calls to unloaded tools are blocked with a "load first" message.
+- **Registry changes:** every catalog tool is registered at build time, and the agent is rebuilt between requests when the registry revision changes.
 
-Gate: schemas of unloaded capabilities are never sent to the model.
+Gate: schemas of unloaded tools are never sent to the model (checked from the token ledger).
 
 ### Stage 5 — First capability: places · planned
 

@@ -1,9 +1,10 @@
 """The handler allowlist: the only code a registry definition can run.
 
-A definition in MongoDB is just a `source_id` and a description. It becomes
-executable only if code registered a handler under that exact `source_id`
-(Stage 3 invariant 1). The registration, not the database, declares the input
-model, the output model and whether the handler needs the area.
+A definition in MongoDB is just a numeric `source_id` and a description. It
+becomes executable only if code registered a handler under that exact
+`source_id` (Stage 3 invariant 13): one handler per `source_id`, no grouping.
+The registration, not the database, declares the input model, the output model
+and whether the handler needs the area; the model-facing name is generated.
 
 Registration enforces the shape rules up front, so a bad handler fails at
 import time instead of mid-conversation:
@@ -15,7 +16,6 @@ import time instead of mid-conversation:
     schema the model sees stays small and the output check stays simple.
 """
 
-import re
 import typing
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -25,11 +25,10 @@ from pydantic import BaseModel
 
 from geosearch.config import GeoConfig
 from geosearch.geo.ops import AreaOps
-from geosearch.registry.models import SOURCE_ID_PATTERN
+from geosearch.registry.models import model_name_for
 
 RESERVED_INPUT_FIELDS = frozenset({"area_id", "wkt", "geometry", "runtime"})
 RESERVED_OUTPUT_FIELDS = frozenset({"wkt", "geometry"})  # the model never sees geometry
-_SOURCE_ID_RE = re.compile(SOURCE_ID_PATTERN)
 
 
 class HandlerError(Exception):
@@ -39,8 +38,8 @@ class HandlerError(Exception):
 class UnknownHandler(HandlerError):
     """A `source_id` has no registered handler: it is not on the allowlist."""
 
-    def __init__(self, source_id: str):
-        super().__init__(f"no handler registered for source_id {source_id!r}")
+    def __init__(self, source_id: int):
+        super().__init__(f"no handler registered for source_id {source_id}")
         self.source_id = source_id
 
 
@@ -57,7 +56,7 @@ class HandlerContext:
     area_ops: AreaOps
     cfg: GeoConfig
     turn: int
-    capability: str
+    source_id: int
 
 
 @dataclass
@@ -75,14 +74,15 @@ Handler = Callable[[Any, HandlerContext], ToolResult]
 
 
 @dataclass(frozen=True)
-class HandlerSpec:
+class RegisteredHandler:
     """A registered handler and the contract code declares for it."""
 
-    source_id: str
-    func: Handler
+    source_id: int
+    model_name: str
     input_model: type[BaseModel]
     output_model: type[BaseModel]
     uses_area: bool
+    func: Handler
 
     @property
     def output_fields(self) -> list[str]:
@@ -96,7 +96,7 @@ def _contains_model(annotation: Any) -> bool:
     return any(_contains_model(arg) for arg in typing.get_args(annotation))
 
 
-def _check_model(source_id: str, role: str, model: Any, reserved: frozenset[str]) -> None:
+def _check_model(source_id: int, role: str, model: Any, reserved: frozenset[str]) -> None:
     if not (isinstance(model, type) and issubclass(model, BaseModel)):
         raise InvalidHandler(f"{source_id}: {role} must be a pydantic BaseModel subclass")
     for name, info in model.model_fields.items():
@@ -111,34 +111,39 @@ class HandlerRegistry:
     module dict so tests can build isolated registries."""
 
     def __init__(self) -> None:
-        self._specs: dict[str, HandlerSpec] = {}
+        self._specs: dict[int, RegisteredHandler] = {}
 
     def register(
         self,
-        source_id: str,
         *,
+        source_id: int,
         input_model: type[BaseModel],
         output_model: type[BaseModel],
         uses_area: bool = False,
     ) -> Callable[[Handler], Handler]:
-        if not _SOURCE_ID_RE.match(source_id):
-            raise InvalidHandler(f"invalid source_id {source_id!r}")
+        if type(source_id) is not int or source_id <= 0:
+            raise InvalidHandler(f"source_id must be a positive int, got {source_id!r}")
         if source_id in self._specs:
-            raise InvalidHandler(f"duplicate handler for source_id {source_id!r}")
+            raise InvalidHandler(f"duplicate handler for source_id {source_id}")
         _check_model(source_id, "input_model", input_model, RESERVED_INPUT_FIELDS)
         _check_model(source_id, "output_model", output_model, RESERVED_OUTPUT_FIELDS)
 
         def decorator(func: Handler) -> Handler:
             if source_id in self._specs:  # registered between call and decoration
-                raise InvalidHandler(f"duplicate handler for source_id {source_id!r}")
-            self._specs[source_id] = HandlerSpec(
-                source_id, func, input_model, output_model, uses_area
+                raise InvalidHandler(f"duplicate handler for source_id {source_id}")
+            self._specs[source_id] = RegisteredHandler(
+                source_id=source_id,
+                model_name=model_name_for(source_id),
+                input_model=input_model,
+                output_model=output_model,
+                uses_area=uses_area,
+                func=func,
             )
             return func
 
         return decorator
 
-    def get(self, source_id: str) -> HandlerSpec:
+    def get(self, source_id: int) -> RegisteredHandler:
         try:
             return self._specs[source_id]
         except KeyError:
@@ -147,7 +152,7 @@ class HandlerRegistry:
     def __contains__(self, source_id: object) -> bool:
         return source_id in self._specs
 
-    def __iter__(self) -> Iterator[str]:
+    def __iter__(self) -> Iterator[int]:
         return iter(sorted(self._specs))
 
     def __len__(self) -> int:

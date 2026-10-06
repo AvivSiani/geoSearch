@@ -41,8 +41,9 @@ Responsibility split, which guides every design choice:
 
 ### Stage 3 invariants (registry)
 
-13. **Allowlist.** A registry definition runs only if its `source_id` has a
-    handler registered in code (`registry/handlers.py`). Every stored
+13. **Allowlist.** A registry definition (`source_id: int` + `description`, nothing
+    else) runs only if its `source_id` has a handler registered in code
+    (`registry/handlers.py`), one handler per `source_id`. Every stored
     `source_id` must have a handler: seeding refuses unknown ones, and startup
     fails on them (`registry.strict_startup`, else they are logged and skipped).
 14. **No area inputs.** Handler input models never contain `area_id`, `wkt` or
@@ -50,10 +51,14 @@ Responsibility split, which guides every design choice:
     The resolver injects `area_id` from agent state for `uses_area=True` handlers.
 15. **Result size.** A registry tool's inline result is at most
     `registry.max_inline_result_chars`; artifacts and oversized `data` go to
-    working-memory files under `/turns/<turn>/results/<capability>/<k>.json`.
+    working-memory files under `/turns/<turn>/results/<source_id>/<k>.json`.
 16. **No MongoDB in old tests.** Stage 1–2 tests never need MongoDB: they pass
     an `InMemoryRegistry` to `create_app(..., tool_registry=...)`. MongoDB
     tests use the `mongo_db` fixture and skip when the server is down.
+17. **No grouping.** Tools have no names, prefixes or capabilities: a numeric
+    `source_id` and a description. The model-facing name is generated
+    (`source_<id>`). The agent selects tools from their descriptions alone, so
+    every description must be clear and distinct from the others.
 
 ## Verified library APIs (Stage 2, pinned versions)
 
@@ -100,17 +105,16 @@ Pinned: `pymongo==4.18.2`. Confirmed against it and the Stage 2 pins:
   `Command(update={"messages": [ToolMessage(..., tool_call_id=runtime.tool_call_id)],
   "files": {...}})`; the call id comes from `runtime.tool_call_id`.
 - **PyMongo**: `find_one_and_update(filter, update, upsert=True,
-  return_document=ReturnDocument.AFTER)`. An anchored `_id` regex (`^demo\.`)
-  is an `IXSCAN` on the `_id` index (asserted via `explain()` in the tests).
-  Idempotent upsert = `update_one({_id, description: {$ne: d}}, ..., upsert=True)`;
+  return_document=ReturnDocument.AFTER)`. Idempotent upsert = `update_one({_id, description: {$ne: d}}, ..., upsert=True)`;
   a `DuplicateKeyError` there means "unchanged".
 
 ## How to add a tool
 
 No change under `agent/`. Two pieces:
 
-1. **Handler module** in `src/geosearch/capabilities/<capability>.py`, added to
-   `MODULES` in `capabilities/__init__.py` (explicit list, no auto-discovery):
+1. **Handler** in a module under `src/geosearch/sources/`, listed in `MODULES`
+   in `sources/__init__.py` (explicit list, no auto-discovery). One handler per
+   `source_id`; pick an unused positive int:
 
    ```python
    class FindInput(BaseModel):          # flat; no area_id/wkt/geometry/runtime
@@ -121,7 +125,7 @@ No change under `agent/`. Two pieces:
        lon: float
        lat: float
 
-   @register_handler("places.search", input_model=FindInput,
+   @register_handler(source_id=17, input_model=FindInput,
                      output_model=PlaceRow, uses_area=True)
    def search(args: FindInput, ctx: HandlerContext) -> ToolResult:
        rows = ...                       # ctx.area_id, ctx.area_ops, ctx.cfg, ctx.turn
@@ -131,9 +135,11 @@ No change under `agent/`. Two pieces:
 
    If `artifact` is a list, every row must match `output_model` exactly;
    otherwise non-empty `data` must. A mismatch is an error to the model.
-2. **Seed entry** in `registry/seeds/<capability>.yaml` (description ≤ 200 chars,
-   model-facing), then `uv run geosearch-registry seed`. The running app picks
-   it up on the next request (revision check).
+2. **Seed entry** in a YAML file under `registry/seeds/` (`source_id: 17`, and a
+   description ≤ 200 chars that says clearly what the tool does and how it differs
+   from the others — the agent chooses by description alone), then
+   `uv run geosearch-registry seed`. The running app picks it up on the next
+   request (revision check).
 
 Check drift with `uv run geosearch-registry validate`; `seed --prune` removes
 tools that are in no seed file; `delete <source_id>` removes one.

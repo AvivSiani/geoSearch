@@ -1,5 +1,5 @@
-"""Agent tools. Core tools (area, intent, ranking) live here; capability tools
-arrive in later stages via the registry."""
+"""Agent tools. Core tools (area, loading, intent, ranking) live here; registry
+tools are resolved from the tool registry (registry/) and loaded on demand."""
 
 from geosearch.agent.tools.geo import geo_describe_area
 

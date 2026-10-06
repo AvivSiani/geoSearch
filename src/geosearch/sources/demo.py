@@ -1,4 +1,4 @@
-"""Demo capability: proves the registry end to end with no external service.
+"""Demo tool (source_id 9001): proves the registry end to end with no external service.
 
 `demo.sample_points` is deterministic (seeded RNG over the area's bbox, kept
 only where `contains` accepts), so tests and evals can assert exact output.
@@ -26,8 +26,11 @@ class PointRow(BaseModel):
     lat: float
 
 
+DEMO_SOURCE_ID = 9001
+
+
 @register_handler(
-    "demo.sample_points", input_model=SamplePointsInput, output_model=PointRow, uses_area=True
+    source_id=DEMO_SOURCE_ID, input_model=SamplePointsInput, output_model=PointRow, uses_area=True
 )
 def sample_points(args: SamplePointsInput, ctx: HandlerContext) -> ToolResult:
     assert ctx.area_id is not None  # uses_area=True guarantees it

@@ -1,4 +1,4 @@
-"""Stage 3 step 5: seeding, validate() and the startup check, on MongoDB."""
+"""Seeding, validate() and the startup check, on MongoDB."""
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ import pytest
 from pydantic import BaseModel
 from pymongo.database import Database
 
-from geosearch import capabilities
+from geosearch import sources
 from geosearch.registry.handlers import HandlerRegistry, ToolResult, UnknownHandler
 from geosearch.registry.models import ToolDefinition
 from geosearch.registry.seeding import (
@@ -29,19 +29,17 @@ class Row(BaseModel):
     name: str
 
 
-def _handlers(*source_ids: str) -> HandlerRegistry:
+def _handlers(*source_ids: int) -> HandlerRegistry:
     reg = HandlerRegistry()
     for source_id in source_ids:
-        reg.register(source_id, input_model=In, output_model=Row)(
+        reg.register(source_id=source_id, input_model=In, output_model=Row)(
             lambda args, ctx: ToolResult(summary="ok")
         )
     return reg
 
 
-def _write(path: Path, *entries: tuple[str, str]) -> Path:
-    lines = ["tools:"] + [
-        f"  - source_id: {s}\n    description: {d}" for s, d in entries
-    ]
+def _write(path: Path, *entries: tuple[object, str]) -> Path:
+    lines = ["tools:"] + [f"  - source_id: {s}\n    description: {d}" for s, d in entries]
     path.write_text("\n".join(lines) + "\n")
     return path
 
@@ -53,39 +51,39 @@ def registry(mongo_db: Database) -> MongoRegistry:
 
 @pytest.fixture
 def seeds(tmp_path: Path) -> Path:
-    _write(tmp_path / "places.yaml", ("places.search", "Find places."), ("places.near", "Near."))
-    _write(tmp_path / "demo.yaml", ("demo.points", "Points."))
+    _write(tmp_path / "tools.yaml", (17, "Find places."), (18, "Near."))
+    _write(tmp_path / "demo.yaml", (9001, "Points."))
     return tmp_path
 
 
-HANDLERS = _handlers("places.search", "places.near", "demo.points")
+HANDLERS = _handlers(17, 18, 9001)
 
 
 def test_seed_creates_then_is_a_noop(registry: MongoRegistry, seeds: Path) -> None:
     first = seed(registry, [seeds], include_demo=False, handler_registry=HANDLERS)
-    assert sorted(first.created) == ["places.near", "places.search"]
+    assert first.created == [17, 18]
     rev = registry.revision()
 
     again = seed(registry, [seeds], include_demo=False, handler_registry=HANDLERS)
     assert again.created == again.changed == again.deleted == []
-    assert sorted(again.unchanged) == ["places.near", "places.search"]
+    assert again.unchanged == [17, 18]
     assert registry.revision() == rev
 
 
 def test_seed_reports_changes(registry: MongoRegistry, seeds: Path) -> None:
     seed(registry, [seeds], include_demo=False, handler_registry=HANDLERS)
-    _write(seeds / "places.yaml", ("places.search", "Find places, v2."), ("places.near", "Near."))
+    _write(seeds / "tools.yaml", (17, "Find places, v2."), (18, "Near."))
     report = seed(registry, [seeds], include_demo=False, handler_registry=HANDLERS)
-    assert report.changed == ["places.search"]
-    assert report.unchanged == ["places.near"]
-    assert registry.get_tool("places.search").description == "Find places, v2."
+    assert report.changed == [17]
+    assert report.unchanged == [18]
+    assert registry.get_tool(17).description == "Find places, v2."
 
 
 def test_demo_seed_needs_include_demo(registry: MongoRegistry, seeds: Path) -> None:
     seed(registry, [seeds], include_demo=False, handler_registry=HANDLERS)
-    assert "demo" not in registry.list_capabilities()
+    assert 9001 not in {t.source_id for t in registry.list_tools()}
     seed(registry, [seeds], include_demo=True, handler_registry=HANDLERS)
-    assert "demo" in registry.list_capabilities()
+    assert 9001 in {t.source_id for t in registry.list_tools()}
 
 
 def test_explicit_demo_file_is_loaded(seeds: Path) -> None:
@@ -97,22 +95,29 @@ def test_prune_deletes_tools_in_no_seed_file(registry: MongoRegistry, seeds: Pat
     report = seed(registry, [seeds], include_demo=False, handler_registry=HANDLERS)
     assert report.deleted == []  # no prune: extra tools stay
     report = seed(registry, [seeds], include_demo=False, prune=True, handler_registry=HANDLERS)
-    assert report.deleted == ["demo.points"]
-    assert registry.list_capabilities() == ["places"]
+    assert report.deleted == [9001]
+    assert [t.source_id for t in registry.list_tools()] == [17, 18]
 
 
-def test_unknown_handler_fails_by_name_and_writes_nothing(
+def test_unknown_handler_fails_by_id_and_writes_nothing(
     registry: MongoRegistry, tmp_path: Path
 ) -> None:
-    _write(tmp_path / "x.yaml", ("places.search", "Find."), ("places.typo", "Oops."))
-    with pytest.raises(UnknownHandler, match="places.typo"):
+    _write(tmp_path / "x.yaml", (17, "Find."), (4242, "Oops."))
+    with pytest.raises(UnknownHandler, match="4242"):
         seed(registry, [tmp_path], include_demo=False, handler_registry=HANDLERS)
-    assert registry.revision() == 0 and registry.list_capabilities() == []
+    assert registry.revision() == 0 and registry.list_tools() == []
 
 
 @pytest.mark.parametrize(
     "content",
-    ["tools: [", "tools: 3", "- just a list", "tools:\n  - source_id: Bad.Id\n    description: x"],
+    [
+        "tools: [",
+        "tools: 3",
+        "- just a list",
+        "tools:\n  - source_id: demo.sample_points\n    description: x",
+        "tools:\n  - source_id: '17'\n    description: x",
+        "tools:\n  - source_id: 0\n    description: x",
+    ],
 )
 def test_malformed_seed_files_fail(tmp_path: Path, registry: MongoRegistry, content: str) -> None:
     (tmp_path / "bad.yaml").write_text(content)
@@ -121,8 +126,8 @@ def test_malformed_seed_files_fail(tmp_path: Path, registry: MongoRegistry, cont
 
 
 def test_duplicate_source_id_across_files_fails(tmp_path: Path, registry: MongoRegistry) -> None:
-    _write(tmp_path / "a.yaml", ("places.search", "A."))
-    _write(tmp_path / "b.yaml", ("places.search", "B."))
+    _write(tmp_path / "a.yaml", (17, "A."))
+    _write(tmp_path / "b.yaml", (17, "B."))
     with pytest.raises(SeedFileError, match="already defined"):
         seed(registry, [tmp_path], include_demo=False, handler_registry=HANDLERS)
 
@@ -136,35 +141,42 @@ def test_validate_reports_drift_without_writing(registry: MongoRegistry, seeds: 
     seed(registry, [seeds], include_demo=True, handler_registry=HANDLERS)
     assert validate(registry, [seeds], include_demo=True, handler_registry=HANDLERS).ok
 
-    registry.upsert_tool(ToolDefinition(source_id="places.search", description="Edited in DB."))
-    registry.upsert_tool(ToolDefinition(source_id="rogue.tool", description="Not seeded."))
-    registry.delete_tool("places.near")
+    registry.upsert_tool(ToolDefinition(source_id=17, description="Edited in DB."))
+    registry.upsert_tool(ToolDefinition(source_id=666, description="Not seeded."))
+    registry.delete_tool(18)
     rev = registry.revision()
 
     report = validate(registry, [seeds], include_demo=True, handler_registry=HANDLERS)
     assert not report.ok
     diffs = {d.source_id: (d.seed, d.db) for d in report.differences}
-    assert diffs == {
-        "places.search": ("Find places.", "Edited in DB."),
-        "places.near": ("Near.", None),
-    }
-    assert report.not_in_seeds == ["rogue.tool"]
-    assert report.without_handler == ["rogue.tool"]
+    assert diffs == {17: ("Find places.", "Edited in DB."), 18: ("Near.", None)}
+    assert report.not_in_seeds == [666]
+    assert report.without_handler == [666]
+    assert report.handlers_not_in_db == [18]
     assert registry.revision() == rev
 
 
+def test_validate_warns_about_handlers_without_definition(
+    registry: MongoRegistry, seeds: Path
+) -> None:
+    seed(registry, [seeds], include_demo=False, handler_registry=HANDLERS)
+    report = validate(registry, [seeds], include_demo=False, handler_registry=HANDLERS)
+    assert report.handlers_not_in_db == [9001]
+    assert report.ok  # a warning, not a problem
+
+
 def test_startup_check(registry: MongoRegistry) -> None:
-    registry.upsert_tool(ToolDefinition(source_id="places.search", description="Find."))
+    registry.upsert_tool(ToolDefinition(source_id=17, description="Find."))
     assert check_startup(registry, strict=True, handler_registry=HANDLERS) == []
 
-    registry.upsert_tool(ToolDefinition(source_id="rogue.tool", description="No handler."))
-    with pytest.raises(UnknownHandler, match="rogue.tool"):
+    registry.upsert_tool(ToolDefinition(source_id=666, description="No handler."))
+    with pytest.raises(UnknownHandler, match="666"):
         check_startup(registry, strict=True, handler_registry=HANDLERS)
-    assert check_startup(registry, strict=False, handler_registry=HANDLERS) == ["rogue.tool"]
+    assert check_startup(registry, strict=False, handler_registry=HANDLERS) == [666]
 
 
 def test_repo_seeds_match_real_handlers(registry: MongoRegistry) -> None:
-    capabilities.load_all()
+    sources.load_all()
     report = seed(registry, [REPO_SEEDS], include_demo=True)
-    assert "demo.sample_points" in report.created
+    assert 9001 in report.created
     assert validate(registry, [REPO_SEEDS], include_demo=True).ok

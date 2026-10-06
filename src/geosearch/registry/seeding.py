@@ -9,7 +9,7 @@ revision alone), `validate` reports where they differ without writing, and
 Seed file format:
 
     tools:
-      - source_id: demo.sample_points
+      - source_id: 9001
         description: Return up to `count` random points inside the current area.
 
 The demo seed (`demo.yaml`) is skipped when expanding a directory unless
@@ -39,15 +39,15 @@ class SeedFileError(Exception):
 
 @dataclass
 class SeedReport:
-    created: list[str] = field(default_factory=list)
-    changed: list[str] = field(default_factory=list)
-    unchanged: list[str] = field(default_factory=list)
-    deleted: list[str] = field(default_factory=list)
+    created: list[int] = field(default_factory=list)
+    changed: list[int] = field(default_factory=list)
+    unchanged: list[int] = field(default_factory=list)
+    deleted: list[int] = field(default_factory=list)
 
 
 @dataclass
 class DescriptionDiff:
-    source_id: str
+    source_id: int
     seed: str
     db: str | None  # None: in a seed file but not in the database
 
@@ -55,8 +55,10 @@ class DescriptionDiff:
 @dataclass
 class ValidationReport:
     differences: list[DescriptionDiff] = field(default_factory=list)
-    not_in_seeds: list[str] = field(default_factory=list)  # DB tools in no seed file
-    without_handler: list[str] = field(default_factory=list)  # seed or DB source_ids
+    not_in_seeds: list[int] = field(default_factory=list)  # DB tools in no seed file
+    without_handler: list[int] = field(default_factory=list)  # seed or DB source_ids
+    # A warning, not a problem: e.g. the demo handler when demo isn't seeded.
+    handlers_not_in_db: list[int] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -79,7 +81,7 @@ def seed_files(paths: Iterable[Path], include_demo: bool) -> list[Path]:
 
 def load_definitions(files: Sequence[Path]) -> list[ToolDefinition]:
     """Parse and validate every definition; a source_id may appear only once."""
-    seen: dict[str, Path] = {}
+    seen: dict[int, Path] = {}
     definitions: list[ToolDefinition] = []
     for path in files:
         try:
@@ -96,18 +98,14 @@ def load_definitions(files: Sequence[Path]) -> list[ToolDefinition]:
                 raise SeedFileError(f"{path}: tools[{i}]: {exc}") from exc
             if td.source_id in seen:
                 raise SeedFileError(
-                    f"{path}: {td.source_id!r} is already defined in {seen[td.source_id]}"
+                    f"{path}: source_id {td.source_id} is already defined in {seen[td.source_id]}"
                 )
             seen[td.source_id] = path
             definitions.append(td)
     return definitions
 
 
-def all_tools(registry: Registry) -> list[ToolDefinition]:
-    return [td for cap in registry.list_capabilities() for td in registry.get_tools(cap)]
-
-
-def _require_handlers(source_ids: Iterable[str], handler_registry: HandlerRegistry) -> None:
+def _require_handlers(source_ids: Iterable[int], handler_registry: HandlerRegistry) -> None:
     for source_id in sorted(source_ids):
         if source_id not in handler_registry:
             raise UnknownHandler(source_id)
@@ -127,7 +125,7 @@ def seed(
     _require_handlers((td.source_id for td in definitions), handler_registry)
 
     report = SeedReport()
-    existing = {td.source_id for td in all_tools(registry)}
+    existing = {td.source_id for td in registry.list_tools()}
     for td in definitions:
         if not registry.upsert_tool(td):
             report.unchanged.append(td.source_id)
@@ -153,7 +151,7 @@ def validate(
 ) -> ValidationReport:
     """Read-only: how the database differs from the seed files and the allowlist."""
     definitions = load_definitions(seed_files(paths, include_demo))
-    stored = {td.source_id: td.description for td in all_tools(registry)}
+    stored = {td.source_id: td.description for td in registry.list_tools()}
     seeded = {td.source_id: td.description for td in definitions}
 
     report = ValidationReport()
@@ -165,20 +163,21 @@ def validate(
     report.without_handler = sorted(
         s for s in set(stored) | set(seeded) if s not in handler_registry
     )
+    report.handlers_not_in_db = sorted(s for s in handler_registry if s not in stored)
     return report
 
 
 def check_startup(
     registry: Registry, *, strict: bool, handler_registry: HandlerRegistry = handlers
-) -> list[str]:
+) -> list[int]:
     """Every stored source_id must be on the allowlist. Strict: raise for the
     first offender. Lenient: log each one and return them, so the catalog can
     skip them while the app still starts."""
     missing = sorted(
-        td.source_id for td in all_tools(registry) if td.source_id not in handler_registry
+        td.source_id for td in registry.list_tools() if td.source_id not in handler_registry
     )
     if missing and strict:
         raise UnknownHandler(missing[0])
     for source_id in missing:
-        log.warning("registry: skipping %r: no handler registered", source_id)
+        log.warning("registry: skipping source_id %s: no handler registered", source_id)
     return missing

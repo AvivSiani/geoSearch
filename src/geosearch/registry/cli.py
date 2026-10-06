@@ -10,9 +10,10 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from pydantic import ValidationError
 from pymongo.errors import PyMongoError
 
-from geosearch import capabilities
+from geosearch import sources
 from geosearch.config import GeoConfig
 from geosearch.registry.handlers import UnknownHandler
 from geosearch.registry.mongo import connect, database, ping
@@ -20,7 +21,6 @@ from geosearch.registry.seeding import (
     SeedFileError,
     SeedReport,
     ValidationReport,
-    all_tools,
     seed,
     validate,
 )
@@ -46,14 +46,15 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("list", help="list stored definitions")
 
     p_delete = sub.add_parser("delete", help="delete one definition")
-    p_delete.add_argument("source_id")
+    p_delete.add_argument("source_id", type=int)
     return parser
 
 
 def _print_seed(report: SeedReport) -> None:
     for label in ("created", "changed", "unchanged", "deleted"):
         items = getattr(report, label)
-        print(f"{label}: {len(items)}" + (f"  ({', '.join(items)})" if items else ""))
+        listed = ", ".join(str(i) for i in items)
+        print(f"{label}: {len(items)}" + (f"  ({listed})" if items else ""))
 
 
 def _print_validation(report: ValidationReport) -> None:
@@ -64,6 +65,8 @@ def _print_validation(report: ValidationReport) -> None:
         print(f"not in any seed file: {source_id}")
     for source_id in report.without_handler:
         print(f"no handler: {source_id}")
+    for source_id in report.handlers_not_in_db:
+        print(f"warning: handler without a DB definition: {source_id}")
     print("ok" if report.ok else "problems found")
 
 
@@ -79,7 +82,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: MongoDB is unreachable (docker compose up -d?)", file=sys.stderr)
         return USAGE
     registry = MongoRegistry(database(client, cfg.mongo))
-    capabilities.load_all()
+    sources.load_all()
     include_demo = getattr(args, "include_demo", False) or cfg.registry.seed_demo
     paths = getattr(args, "paths", None) or [cfg.registry.seeds_dir]
 
@@ -93,18 +96,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_validation(report)
             return OK if report.ok else PROBLEMS
         if args.command == "list":
-            for td in all_tools(registry):
+            for td in registry.list_tools():
                 print(f"{td.source_id}\t{td.description}")
             print(f"revision: {registry.revision()}")
             return OK
         if args.command == "delete":
             if not registry.delete_tool(args.source_id):
-                print(f"error: {args.source_id!r} is not in the registry", file=sys.stderr)
+                print(f"error: source_id {args.source_id} is not in the registry", file=sys.stderr)
                 return PROBLEMS
             print(f"deleted: {args.source_id}\nrevision: {registry.revision()}")
             return OK
     except (SeedFileError, UnknownHandler) as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return PROBLEMS
+    except ValidationError as exc:  # a stored document that isn't a valid definition
+        print(f"error: invalid stored definition: {exc}", file=sys.stderr)
         return PROBLEMS
     except PyMongoError as exc:
         print(f"error: MongoDB failed: {type(exc).__name__}", file=sys.stderr)

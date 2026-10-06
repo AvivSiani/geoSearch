@@ -32,10 +32,10 @@ def _cfg(**registry: object) -> GeoConfig:
 
 def test_injected_registry_sets_the_catalog() -> None:
     registry = InMemoryRegistry(
-        [ToolDefinition(source_id="demo.sample_points", description="Points.")]
+        [ToolDefinition(source_id=9001, description="Points.")]
     )
     app = create_app(GeoConfig(_env_file=None), model=_model(), tool_registry=registry)
-    assert app.state.catalog.capabilities == ["demo"]
+    assert [e.source_id for e in app.state.catalog.tools] == [9001]
 
 
 def test_unreachable_and_required_fails_startup() -> None:
@@ -47,25 +47,25 @@ def test_unreachable_and_required_fails_startup() -> None:
 def test_unreachable_and_optional_starts_empty(caplog: pytest.LogCaptureFixture) -> None:
     cfg = _cfg(required=False).model_copy(update={"mongo": DEAD_MONGO})
     app = create_app(cfg, model=_model())
-    assert app.state.catalog.capabilities == []
+    assert app.state.catalog.tools == ()
     assert "MongoDB unreachable" in caplog.text
 
 
 def test_unknown_stored_source_id_fails_startup_by_name() -> None:
-    registry = InMemoryRegistry([ToolDefinition(source_id="rogue.tool", description="d")])
-    with pytest.raises(UnknownHandler, match="rogue.tool"):
+    registry = InMemoryRegistry([ToolDefinition(source_id=666, description="d")])
+    with pytest.raises(UnknownHandler, match="666"):
         create_app(GeoConfig(_env_file=None), model=_model(), tool_registry=registry)
 
 
 def test_lenient_startup_skips_unknown_source_ids() -> None:
     registry = InMemoryRegistry(
         [
-            ToolDefinition(source_id="rogue.tool", description="d"),
-            ToolDefinition(source_id="demo.sample_points", description="Points."),
+            ToolDefinition(source_id=666, description="d"),
+            ToolDefinition(source_id=9001, description="Points."),
         ]
     )
     app = create_app(_cfg(strict_startup=False), model=_model(), tool_registry=registry)
-    assert app.state.catalog.capabilities == ["demo"]
+    assert [e.source_id for e in app.state.catalog.tools] == [9001]
 
 
 def test_cli_change_is_picked_up_on_next_request(
@@ -76,14 +76,14 @@ def test_cli_change_is_picked_up_on_next_request(
     client = TestClient(app)
     body = {"wkt": HANDOFF_POLYGON, "prompt": "q"}
     assert client.post("/v1/requests", json=body).status_code == 200
-    assert app.state.catalog.capabilities == []
+    assert app.state.catalog.tools == ()
 
     assert main(["seed", SEEDS, "--include-demo"]) == 0
-    assert app.state.catalog.capabilities == []  # nothing changes between requests
+    assert app.state.catalog.tools == ()  # nothing changes between requests
     assert client.post("/v1/requests", json=body).status_code == 200
-    assert app.state.catalog.capabilities == ["demo"]
-    assert [t.name for t in app.state.catalog.tools_for("demo")] == ["demo_sample_points"]
+    assert [e.source_id for e in app.state.catalog.tools] == [9001]
+    assert app.state.catalog.tool(9001).name == "source_9001"
 
-    assert main(["delete", "demo.sample_points"]) == 0
+    assert main(["delete", "9001"]) == 0
     client.post("/v1/requests", json=body)
-    assert app.state.catalog.capabilities == []
+    assert app.state.catalog.tools == ()
