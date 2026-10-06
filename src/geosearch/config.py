@@ -182,9 +182,10 @@ class RegistryConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_limit(self) -> "RegistryConfig":
-        if self.max_inline_result_chars < 100:
+        # Room for a short summary plus two file-pointer lines.
+        if self.max_inline_result_chars < 300:
             raise ValueError(
-                "registry.max_inline_result_chars must be >= 100, got "
+                "registry.max_inline_result_chars must be >= 300, got "
                 f"{self.max_inline_result_chars}"
             )
         return self

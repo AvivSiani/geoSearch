@@ -1,0 +1,269 @@
+"""Definition -> LangChain tool, only through the handler allowlist.
+
+The resolved tool is the one place where registry data, handler code and agent
+runtime meet, so it carries the guarantees:
+  - The model sees `td.model_name`, `td.description` and a compacted schema built
+    from the handler's input model — nothing else. The runtime is injected via
+    the `runtime` parameter name, which ToolNode fills and the schema never shows.
+  - The area comes from agent state, never from arguments (invariant 2).
+  - Arguments are validated here: a dict `args_schema` makes LangChain pass
+    them through unchecked, which is what lets us return a short, model-readable
+    error instead of an exception.
+  - The handler's output is checked against its declared `output_model`, so a
+    declared field cannot silently disappear and an undeclared one cannot leak.
+  - Inline results stay under `max_inline_result_chars` (invariant 3); bulk
+    results go to working-memory files under /turns/<turn>/results/<capability>/.
+"""
+
+import json
+import logging
+import threading
+from collections import OrderedDict
+from typing import Any
+
+from deepagents.backends.state import create_file_data
+from langchain.tools import ToolRuntime
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import BaseTool, StructuredTool
+from langgraph.types import Command
+from pydantic import BaseModel, ValidationError
+
+from geosearch.registry.handlers import (
+    HandlerContext,
+    HandlerRegistry,
+    HandlerSpec,
+    ToolResult,
+    UnknownHandler,
+    handlers,
+)
+from geosearch.registry.models import ToolDefinition
+from geosearch.registry.store import Registry
+
+log = logging.getLogger(__name__)
+
+TRUNCATED = "…(truncated)"
+_KEEP_KEYS = (
+    "type", "description", "enum", "const", "default",
+    "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+    "minLength", "maxLength", "minItems", "maxItems",
+)  # fmt: skip
+_MAX_ERRORS_SHOWN = 3
+
+
+# --- schema -----------------------------------------------------------------------
+
+
+def _compact(node: dict[str, Any], defs: dict[str, Any]) -> dict[str, Any]:
+    """Keep only what helps the model pick arguments; inline `$ref`s (an Enum
+    field produces one) so the schema is self-contained and flat."""
+    if "$ref" in node:  # the field's own keys (description, default) win
+        node = {**defs[node["$ref"].rsplit("/", 1)[-1]], **node}
+    out = {k: node[k] for k in _KEEP_KEYS if k in node}
+    if "items" in node:
+        out["items"] = _compact(node["items"], defs)
+    if "anyOf" in node:
+        out["anyOf"] = [_compact(option, defs) for option in node["anyOf"]]
+    return out
+
+
+def compact_schema(input_model: type[BaseModel]) -> dict[str, Any]:
+    full = input_model.model_json_schema()
+    defs = full.get("$defs", {})
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {name: _compact(p, defs) for name, p in full["properties"].items()},
+    }
+    if full.get("required"):
+        schema["required"] = full["required"]
+    return schema
+
+
+# --- result shaping ---------------------------------------------------------------
+
+
+def _json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def _validation_summary(exc: ValidationError) -> str:
+    parts = [
+        f"{'.'.join(str(p) for p in err['loc']) or 'arguments'}: {err['msg']}"
+        for err in exc.errors()[:_MAX_ERRORS_SHOWN]
+    ]
+    return "; ".join(parts)
+
+
+def check_output(spec: HandlerSpec, result: ToolResult) -> str | None:
+    """None if the result matches the declared output model, else the reason.
+    Rows (or `data`) must have exactly the declared fields: missing ones would
+    silently disappear, extra ones would leak undeclared output to the model."""
+    if not isinstance(result, ToolResult):
+        return f"handler returned {type(result).__name__}, not ToolResult"
+    if isinstance(result.artifact, list):
+        rows = result.artifact
+    else:
+        rows = [result.data] if result.data else []  # empty data: nothing to check
+    declared = set(spec.output_model.model_fields)
+    for i, row in enumerate(rows):
+        where = f"row {i}" if isinstance(result.artifact, list) else "data"
+        if not isinstance(row, dict):
+            return f"{where} is {type(row).__name__}, not an object"
+        if extra := sorted(set(row) - declared):
+            return f"{where} has undeclared fields {extra}"
+        try:
+            spec.output_model.model_validate(row)
+        except ValidationError as exc:
+            return f"{where}: {_validation_summary(exc)}"
+    return None
+
+
+class _FileNumbers:
+    """Next free `<k>` per conversation and results directory. State shows
+    files from earlier steps, but parallel tool calls in one step all see the
+    same state, so numbers handed out in-process are remembered too (bounded LRU)."""
+
+    def __init__(self, max_dirs: int = 1_024):
+        self._lock = threading.Lock()
+        self._last: OrderedDict[tuple[str, str], int] = OrderedDict()
+        self._max_dirs = max_dirs
+
+    def next(self, conversation_id: str, directory: str, files: dict[str, Any]) -> int:
+        prefix = f"{directory}/"
+        used = [
+            int(stem)
+            for path in files
+            if path.startswith(prefix) and (stem := path[len(prefix) : -len(".json")]).isdigit()
+        ]
+        with self._lock:
+            key = (conversation_id, directory)
+            k = max([0, *used, self._last.get(key, 0)]) + 1
+            self._last[key] = k
+            self._last.move_to_end(key)
+            while len(self._last) > self._max_dirs:
+                self._last.popitem(last=False)
+        return k
+
+
+_numbers = _FileNumbers()
+
+
+def _shape(
+    result: ToolResult,
+    *,
+    conversation_id: str,
+    directory: str,
+    files: dict[str, Any],
+    limit: int,
+) -> tuple[str, dict[str, Any]]:
+    """Build the inline message and any files to write, keeping the message
+    within `limit`. Order of fallbacks: offload data, then truncate summary."""
+    data, artifact = dict(result.data), result.artifact
+    data_line = f"\ndata: {_json(data)}" if data else ""
+    if artifact is None and data and len(result.summary) + len(data_line) > limit:
+        artifact, data, data_line = data, {}, ""  # auto-offload
+
+    new_files: dict[str, Any] = {}
+
+    def write(value: Any) -> str:
+        k = _numbers.next(conversation_id, directory, {**files, **new_files})
+        path = f"{directory}/{k}.json"
+        new_files[path] = create_file_data(_json(value))
+        return path
+
+    tail = ""
+    if artifact is not None:
+        tail = f"\nfull result: {write(artifact)}"
+        if data and len(result.summary) + len(data_line) + len(tail) > limit:
+            data_line = f"\ndata: {write(data)}"
+
+    summary, rest = result.summary, data_line + tail
+    if len(summary) + len(rest) > limit:
+        summary = summary[: max(0, limit - len(rest) - len(TRUNCATED))] + TRUNCATED
+    return (summary + rest)[:limit], new_files
+
+
+# --- the tool ---------------------------------------------------------------------
+
+
+def _error(td: ToolDefinition, runtime: ToolRuntime, text: str) -> ToolMessage:
+    return ToolMessage(
+        content=f"Error: {text}",
+        tool_call_id=runtime.tool_call_id,
+        name=td.model_name,
+        status="error",
+    )
+
+
+def resolve(td: ToolDefinition, handler_registry: HandlerRegistry = handlers) -> BaseTool:
+    """Raises UnknownHandler if `td.source_id` is not on the allowlist."""
+    spec = handler_registry.get(td.source_id)
+    schema = compact_schema(spec.input_model)
+
+    def run(runtime: ToolRuntime, **kwargs: Any) -> Command | ToolMessage:
+        try:
+            args = spec.input_model.model_validate(kwargs)
+        except ValidationError as exc:
+            return _error(td, runtime, f"invalid arguments: {_validation_summary(exc)}")
+
+        conversation = runtime.state.get("conversation") or {}
+        area_id = conversation.get("area_id") if spec.uses_area else None
+        if spec.uses_area and not area_id:
+            return _error(td, runtime, "no area is bound to this conversation")
+        turn = int(conversation.get("turn", 0))
+        cfg = runtime.context.cfg
+        ctx = HandlerContext(
+            area_id=area_id,
+            area_ops=runtime.context.area_ops,
+            cfg=cfg,
+            turn=turn,
+            capability=td.capability,
+        )
+
+        try:
+            result = spec.func(args, ctx)
+        except Exception as exc:
+            log.exception("registry tool %s raised", td.source_id)
+            return _error(td, runtime, f"{td.model_name} failed ({type(exc).__name__})")
+
+        if problem := check_output(spec, result):
+            log.error(
+                "registry tool %s: output does not match its model: %s", td.source_id, problem
+            )
+            fields = ", ".join(spec.output_fields)
+            return _error(td, runtime, f"{td.model_name} returned malformed output ({fields})")
+
+        content, files = _shape(
+            result,
+            conversation_id=str(conversation.get("conversation_id", "")),
+            directory=f"/turns/{turn}/results/{td.capability}",
+            files=runtime.state.get("files") or {},
+            limit=cfg.registry.max_inline_result_chars,
+        )
+        message = ToolMessage(
+            content=content, tool_call_id=runtime.tool_call_id, name=td.model_name
+        )
+        update: dict[str, Any] = {"messages": [message]}
+        if files:
+            update["files"] = files
+        return Command(update=update)
+
+    return StructuredTool(
+        name=td.model_name,
+        description=td.description,
+        args_schema=schema,
+        func=run,
+    )
+
+
+def resolve_capability(
+    registry: Registry, capability: str, handler_registry: HandlerRegistry = handlers
+) -> list[BaseTool]:
+    """Tools without a handler are skipped with a warning; whether that should
+    stop the app is the startup check's decision (`strict_startup`), not ours."""
+    tools: list[BaseTool] = []
+    for td in registry.get_tools(capability):
+        try:
+            tools.append(resolve(td, handler_registry))
+        except UnknownHandler:
+            log.warning("registry: skipping %r: no handler registered", td.source_id)
+    return tools
