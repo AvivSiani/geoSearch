@@ -65,3 +65,20 @@ def test_conversation_busy_returns_409() -> None:
         assert response.json()["code"] == ErrorCode.CONVERSATION_BUSY
     finally:
         entry.lock.release()
+
+
+def test_response_carries_items_and_answer_source() -> None:
+    """Stage 5: the API exposes the grounded items and how the turn finished."""
+    from scripted_model import submit
+
+    app = create_app(
+        GeoConfig(_env_file=None),
+        model=ScriptedChatModel(responses=[submit("No places needed.")]),
+        tool_registry=InMemoryRegistry(),
+    )
+    body = TestClient(app).post(
+        "/v1/requests", json={"wkt": HANDOFF_POLYGON, "prompt": "How big is it?"}
+    ).json()
+    assert body["answer"] == "No places needed."
+    assert body["answer_source"] == "submitted" and body["items"] == []
+    assert body["usage"]["summarizer_calls"] == 0

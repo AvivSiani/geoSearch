@@ -74,6 +74,30 @@ Responsibility split, which guides every design choice:
     running app rebuilds its agent on the next request after the registry
     revision changes (AgentHolder), never mid-request.
 
+### Stage 5 invariants (places, grounded answers)
+
+Detailed spec: `docs/specs/stage-5-places.md`.
+
+22. **Area filter for every tool.** If a handler's output model declares `lon`
+    and `lat`, the resolver drops rows outside the polygon (`AreaOps.contains`),
+    whether or not the tool `uses_area`. Providers get only the area's bbox.
+23. **The main agent never sees raw rows.** Bulk rows ride on
+    `ToolMessage.artifact` (never sent to a model) to `SummarizerMiddleware`,
+    which replaces them with a cited summary and clears the artifact. The tool
+    message never names the working-memory file. Small data-only results pass
+    through unsummarized (D7).
+24. **Items are grounded and short.** A row with an `id` field (the provider's
+    id, `str`) becomes a conversation item with a short id (`i1`, `i2`, …) in
+    `state.items`. Provider ids reach no model; one provider id is one item.
+25. **Citations are checked in code.** Every model-written text (summaries, the
+    answer) passes `strip_invalid_ids`; `submit_answer` rejects unknown ids.
+    Response `items` are built from `state.items`, never from model text.
+26. **A turn finishes with `submit_answer`**, or after one reminder falls back
+    to the last reply (`answer_source: "fallback"`). The summarizer is invoked
+    by code on every result with rows — never chosen by the model.
+27. **Language is decided by code** (`detect_language`: any Hebrew letter →
+    `he`), per turn, never by the model.
+
 ## Verified library APIs (Stage 2, pinned versions)
 
 Pinned: `deepagents==0.7.21`, `langchain==1.4.3`, `langgraph==1.2.12`,
@@ -145,6 +169,26 @@ Confirmed against the Stage 2 pins:
   Ollama's tool-call parser silently drops (empty reply, no tool calls). Prompts
   show named-argument syntax (`source_ids=[...]`) instead.
 
+## Verified library APIs (Stage 5)
+
+Confirmed against the Stage 2 pins:
+
+- **`ToolMessage.artifact`** survives a `Command` update through `ToolNode` and
+  is not part of what a chat model is sent; a `wrap_tool_call` middleware can
+  rewrite the message (or each message in a returned `Command`).
+- **`return_direct=True`** ends the run after the tool even when the tool returns
+  an error, so `submit_answer` is *not* return-direct: a
+  `@hook_config(can_jump_to=["end"])` `before_model` ends the turn once
+  `state.answer` is set, and an `after_model` with `can_jump_to=["model"]` sends
+  the one reminder.
+- **Checkpoint deadlock (langgraph 1.2.12)**: with the default
+  `durability="async"`, each step's checkpoint write waits on the previous one in
+  the run's thread pool; a turn with many steps can fill the pool and hang.
+  `invoke_turn` passes `durability="sync"` when a thread is set — but not
+  without one: 1.2.12's `"sync"` then fails on a write it never made.
+- pytest: run long agent suites with `--tb=short` or `--tb=line`; the default
+  traceback diffs huge message lists and can look like a hang.
+
 ## How to add a tool
 
 No change under `agent/`. Two pieces:
@@ -172,6 +216,11 @@ No change under `agent/`. Two pieces:
 
    If `artifact` is a list, every row must match `output_model` exactly;
    otherwise non-empty `data` must. A mismatch is an error to the model.
+   Declare `lon`/`lat` and the resolver keeps only rows inside the area; declare
+   `id: str` (the provider's id) and rows become citable items, with
+   `ctx.item_ref("i3")` turning a short id back into the provider id. An
+   external service goes behind a provider protocol in `src/geosearch/providers/`
+   with a replay implementation, so tests and evals never need the network.
 2. **Seed entry** in a YAML file under `registry/seeds/` (`source_id: 17`, and a
    description ≤ 200 chars that says clearly what the tool does and how it differs
    from the others — the agent chooses by description alone), then
@@ -186,8 +235,11 @@ tools that are in no seed file; `delete <source_id>` removes one.
 - Python 3.12, managed with `uv`. Run `uv run pytest` and `uv run ruff check .`
   before considering any step done. The eval harness runs separately against the
   real model: `uv run python -m evals.run --suite stage2` and
-  `uv run python -m evals.run --suite stage4 --harness trimmed` (needs MongoDB;
-  seeds and drops a `geosearch_eval` database).
+  `uv run python -m evals.run --suite stage4 --harness trimmed` and
+  `uv run python -m evals.run --suite stage5 --harness trimmed` (need MongoDB;
+  seed and drop a `geosearch_eval` database). Places replay
+  `fixtures/places/` unless `GEOSEARCH_PLACES__PROVIDER=google` (needs a key);
+  `scripts/record_places.py` records real fixtures.
 - MongoDB (tool registry, Stage 3) runs via `docker compose up -d`; registry
   tests skip without it. The app is started with
   `uv run uvicorn geosearch.api.main:app`. Only `api/main.py` builds an app at

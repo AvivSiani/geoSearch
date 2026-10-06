@@ -30,6 +30,20 @@ uv run pytest
 uv run ruff check .
 ```
 
+## Places (Stage 5)
+
+Tools 9101 (search) and 9102 (details) answer place questions in English and
+Hebrew. Seed them with `uv run geosearch-registry seed`. By default they replay
+the synthetic fixtures in `fixtures/places/` (no key, no network); set
+`GEOSEARCH_PLACES__PROVIDER=google` and `GEOSEARCH_PLACES__API_KEY` for the live
+Google Places API (New), and record real fixtures with
+`scripts/record_places.py`.
+
+Every response carries `items` — grounded places, each inside the area, built
+from tool data (`id`, `source_id`, `name`, `lon`, `lat`, `data`) — and
+`answer_source` (`submitted` when the agent finished with `submit_answer`,
+`fallback` otherwise). Detailed design: `docs/specs/stage-5-places.md`.
+
 ## Tool registry
 
 Tool definitions (an integer `source_id` and a description) live in MongoDB; handler
@@ -73,6 +87,14 @@ as the nested delimiter.
 | `registry.max_inline_result_chars` | `GEOSEARCH_REGISTRY__MAX_INLINE_RESULT_CHARS` | `1500` |
 | `registry.required` | `GEOSEARCH_REGISTRY__REQUIRED` | `true` |
 | `registry.strict_startup` | `GEOSEARCH_REGISTRY__STRICT_STARTUP` | `true` |
+| `places.provider` | `GEOSEARCH_PLACES__PROVIDER` | `replay` (or `google`) |
+| `places.api_key` | `GEOSEARCH_PLACES__API_KEY` | unset (required for `google`) |
+| `places.max_results` | `GEOSEARCH_PLACES__MAX_RESULTS` | `20` |
+| `places.fixtures_dir` | `GEOSEARCH_PLACES__FIXTURES_DIR` | `fixtures/places` |
+| `places.timeout_s` | `GEOSEARCH_PLACES__TIMEOUT_S` | `10.0` |
+| `summarizer.chunk_tokens` | `GEOSEARCH_SUMMARIZER__CHUNK_TOKENS` | `2500` |
+| `summarizer.max_chunks` | `GEOSEARCH_SUMMARIZER__MAX_CHUNKS` | `4` |
+| `summarizer.max_output_tokens` | `GEOSEARCH_SUMMARIZER__MAX_OUTPUT_TOKENS` | `400` |
 
 For example, to buffer Points with a 1000 m radius instead of the default:
 

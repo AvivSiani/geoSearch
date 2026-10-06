@@ -53,3 +53,30 @@ def scale_catalog(registry: FakeRegistry | None = None) -> CatalogCache:
     catalog = CatalogCache(registry or scale_registry(), handler_registry=scale_handlers())
     catalog.refresh_if_changed()
     return catalog
+
+
+def places_handlers(reg: HandlerRegistry) -> HandlerRegistry:
+    """Add the real places handlers (9101, 9102) to an isolated registry."""
+    from geosearch.sources import places
+
+    reg.register(
+        source_id=places.PLACES_SEARCH, input_model=places.SearchInput,
+        output_model=places.PlaceRow, uses_area=True,
+    )(places.search)  # fmt: skip
+    reg.register(
+        source_id=places.PLACES_DETAILS, input_model=places.DetailsInput,
+        output_model=places.PlaceDetailsRow, uses_area=True,
+    )(places.details)  # fmt: skip
+    return reg
+
+
+def places_catalog() -> CatalogCache:
+    """The scale fixture, the demo tool and the places tools, as seeded."""
+    import yaml
+
+    seed = yaml.safe_load(open("registry/seeds/places.yaml"))["tools"]
+    registry = FakeRegistry([*FAKE_DEFINITIONS, DEMO_DEFINITION,
+                             *(ToolDefinition(**t) for t in seed)])  # fmt: skip
+    catalog = CatalogCache(registry, handler_registry=places_handlers(scale_handlers()))
+    catalog.refresh_if_changed()
+    return catalog

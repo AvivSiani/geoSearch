@@ -1,0 +1,63 @@
+# Stage 5 eval cases: the places slice on the real model, in English and Hebrew.
+# Same registry as stage4 (repo seeds incl. places 9101/9102, plus the scale
+# fakes) in a throwaway `geosearch_eval` DB. Places replay the committed
+# fixtures (GEOSEARCH_PLACES__PROVIDER defaults to `replay`): synthetic, 13
+# Asian restaurants around the polygon, 3 of them outside it.
+#
+# Gate: the handoff prompt returns 3-5 grounded items inside the polygon, in
+# English and Hebrew, and the main agent never sees raw rows.
+name: stage5
+registry: scale
+wkt: "POLYGON((34.75 32.05, 34.80 32.05, 34.80 32.10, 34.75 32.10, 34.75 32.05))"
+# Strings only raw rows contain: provider ids, the summarizer's row rendering.
+raw_markers: ["ChIJ", "address=", "rating_count=", "primary_type="]
+
+cases:
+  - name: handoff_en
+    turns:
+      - prompt: "Find me a good Asian restaurant that is not too expensive."
+        expect_loaded: [9101]
+        checks:
+          - type: tool_called
+            tool: source_9101
+          - type: answer_submitted
+          - type: items_count
+            min: 3
+            max: 5
+          - type: items_inside_area
+          - type: no_raw_rows
+          - type: no_unoffered_tool_calls
+          - type: under_budget
+
+  - name: handoff_he
+    turns:
+      - prompt: "מצא לי מסעדה אסייתית טובה שלא יקרה מדי."
+        expect_loaded: [9101]
+        checks:
+          - type: tool_called
+            tool: source_9101
+          - type: answer_submitted
+          - type: items_count
+            min: 3
+            max: 5
+          - type: items_inside_area
+          - type: no_raw_rows
+          - type: answer_mostly_hebrew
+          - type: no_unoffered_tool_calls
+          - type: under_budget
+
+  - name: details_follow_up
+    turns:
+      - prompt: "Find me a good Asian restaurant that is not too expensive."
+        expect_loaded: [9101]
+        checks:
+          - type: answer_submitted
+          - type: items_inside_area
+          - type: no_raw_rows
+      - prompt: "What are the opening hours and phone number of the first one?"
+        checks:
+          - type: tool_called
+            tool: source_9102
+          - type: answer_submitted
+          - type: no_raw_rows
+          - type: under_budget

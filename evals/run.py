@@ -3,9 +3,10 @@ plus token stats.
 
     uv run python -m evals.run --suite stage2 --runs 3 [--harness default|trimmed]
     uv run python -m evals.run --suite stage4 --runs 3 --harness trimmed
+    uv run python -m evals.run --suite stage5 --runs 3 --harness trimmed
 
-A suite with `registry: scale` (stage4) needs MongoDB: it seeds a throwaway
-`geosearch_eval` database with the demo tool and the ten scale fakes, builds the
+A suite with `registry: scale` (stage4, stage5) needs MongoDB: it seeds a throwaway
+`geosearch_eval` database with the repo seeds (demo, places) and the ten scale fakes, builds the
 agent from that catalog, and drops the database afterwards. The fakes are
 registered on this process's handler allowlist only.
 
@@ -70,6 +71,8 @@ class RunRecord:
     ledger_records: list[LedgerRecord]
     turn_count: int
     selections: list[tuple[list[int], list[int]]] = field(default_factory=list)  # expected, loaded
+    answer_sources: list[str] = field(default_factory=list)  # per turn (Stage 5)
+    summarizer_calls: list[int] = field(default_factory=list)  # per turn (Stage 5)
 
     @property
     def passed(self) -> bool:
@@ -132,6 +135,7 @@ def _run_case(
     model: Any,
     default_wkt: str,
     catalog: CatalogSnapshot | None = None,
+    raw_markers: list[str] | None = None,
 ) -> RunRecord:
     """Execute every turn of a case in one conversation, collecting per-turn
     results and the token ledger for each turn (fresh context per turn)."""
@@ -149,6 +153,8 @@ def _run_case(
     prev_len = 0
     prev_loaded: list[int] = []
     selections: list[tuple[list[int], list[int]]] = []
+    answer_sources: list[str] = []
+    summarizer_calls: list[int] = []
 
     for i, turn in enumerate(case["turns"], start=1):
         ledger = TokenLedger()
@@ -187,6 +193,15 @@ def _run_case(
         tools_offered: set[str] = set()
         for record in ledger.records:
             tools_offered.update(record.tools_offered)
+        results_read = [
+            str(tc["args"].get("file_path") or tc["args"].get("path") or "")
+            for m in new_messages
+            if isinstance(m, AIMessage)
+            for tc in m.tool_calls
+            if tc["name"] in ("read_file", "ls")
+            and "/results" in str(tc["args"].get("file_path") or tc["args"].get("path") or "")
+        ]
+        summarizer_calls.append(ledger.summary().summarizer_calls)
 
         result = TurnResult(
             prompt=turn["prompt"],
@@ -198,7 +213,19 @@ def _run_case(
             effective_input_budget=cfg.budget.effective_input_budget,
             newly_loaded=newly_loaded,
             tool_results=tool_results,
+            answer_source=outcome.answer_source,
+            item_ids=[item.id for item in outcome.items],
+            items_inside=[
+                item.lon is not None
+                and item.lat is not None
+                and ops.contains(area_id, item.lon, item.lat)
+                for item in outcome.items
+            ],
+            main_context="\n".join(str(m.content) for m in new_messages),
+            raw_markers=list(raw_markers or []),
+            results_read=results_read,
         )
+        answer_sources.append(outcome.answer_source)
         turn_outcomes.append(evaluate_turn(result, turn["checks"]))
         all_records.extend(ledger.records)
 
@@ -207,6 +234,8 @@ def _run_case(
         ledger_records=all_records,
         turn_count=len(case["turns"]),
         selections=selections,
+        answer_sources=answer_sources,
+        summarizer_calls=summarizer_calls,
     )
 
 
@@ -251,6 +280,20 @@ def _token_stats(reports: list[CaseReport]) -> dict[str, float]:
     }
 
 
+def _answer_stats(reports: list[CaseReport]) -> dict[str, float]:
+    """How turns finished (Stage 5): submitted vs fallback, and summarizer use."""
+    sources = [s for cr in reports for run in cr.runs for s in run.answer_sources]
+    calls = [c for cr in reports for run in cr.runs for c in run.summarizer_calls]
+    if not sources:
+        return {}
+    return {
+        "turns": len(sources),
+        "submitted_rate": round(sources.count("submitted") / len(sources), 2),
+        "fallback_rate": round(sources.count("fallback") / len(sources), 2),
+        "mean_summarizer_calls_per_turn": round(statistics.mean(calls), 2) if calls else 0.0,
+    }
+
+
 def _run_suite(suite: dict, runs: int, harness: str) -> dict:
     """Run every case `runs` times for one harness and return its payload dict."""
     cfg = GeoConfig(_env_file=None)
@@ -263,7 +306,9 @@ def _run_suite(suite: dict, runs: int, harness: str) -> dict:
         for case in suite["cases"]:
             case_report = CaseReport(name=case["name"])
             for _ in range(runs):
-                case_report.runs.append(_run_case(case, cfg, model, default_wkt, catalog))
+                case_report.runs.append(
+                    _run_case(case, cfg, model, default_wkt, catalog, suite.get("raw_markers"))
+                )
             reports.append(case_report)
             print(f"  {harness:8s} {case['name']:24s} {case_report.pass_rate:.0%}")
         disclosure = _disclosure_stats(reports, catalog) if catalog else None
@@ -300,6 +345,7 @@ def _run_suite(suite: dict, runs: int, harness: str) -> dict:
             for cr in reports
         },
         "tokens": _token_stats(reports),
+        "answers": _answer_stats(reports),
     }
 
 
@@ -340,6 +386,21 @@ def _combined_markdown(suite: str, stamp: str, payloads: list[dict]) -> str:
         ("Mean calls / turn", "mean_calls_per_turn"),
     ]:
         cells = " | ".join(str(p["tokens"].get(key, 0)) for p in payloads)
+        lines.append(f"| {label} | {cells} |")
+
+    lines += [
+        "",
+        "## How turns finished",
+        "",
+        "| Metric | " + " | ".join(p["harness"] for p in payloads) + " |",
+        "| --- | " + " | ".join("---" for _ in payloads) + " |",
+    ]
+    for label, key in [
+        ("Submitted (submit_answer)", "submitted_rate"),
+        ("Fallback (no submit)", "fallback_rate"),
+        ("Summarizer calls / turn", "mean_summarizer_calls_per_turn"),
+    ]:
+        cells = " | ".join(str(p.get("answers", {}).get(key, 0)) for p in payloads)
         lines.append(f"| {label} | {cells} |")
 
     for p in payloads:

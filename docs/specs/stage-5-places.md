@@ -164,8 +164,11 @@ parking).
 
 ### 3.6 submit_answer, reminder, fallback (`agent/tools/answer.py`, `agent/answer.py`)
 
-- `submit_answer(text: str, item_ids: list[str])` is a core tool with
-  `return_direct=True`, so a successful submit ends the turn.
+- `submit_answer(text: str, item_ids: list[str])` is a core tool. A successful
+  submit ends the turn through `SubmitAnswerMiddleware.before_model`
+  (`can_jump_to=["end"]`, once `state.answer` is set). It is not
+  `return_direct=True`, because LangChain ends a return-direct run even when the
+  tool returns an error, which would leave no chance to fix a bad id.
   - Unknown ids return an error that lists them, so the model can retry, and nothing
     is stored.
   - On success, the `[ids]` in `text` that are not in `item_ids` (or not known) are
@@ -200,7 +203,7 @@ Each step is one reviewed commit (`stage5: step N — …`), with `uv run pytest
 | 3 | Resolver: area filter for every tool; `items` state, reducer, short ids, `item_ref`; artifact rows; no path line. | outside rows dropped and counted; tools without lon/lat untouched; ids are stable across calls and turns; details merges into the same item; provider id never in content; existing resolver tests updated |
 | 4 | `sources/places.py` handlers 9101/9102 + `registry/seeds/places.yaml` + `MODULES`. | handlers against Replay; output models pass `check_output`; seed validates; descriptions ≤ 200 chars |
 | 5 | `ResultSummarizer` + `SummarizerMiddleware`; ledger `role`. | chunk packing; map-reduce call count; invalid ids stripped; language passed through; failure fallback; artifact cleared; data-only results pass through |
-| 6 | `submit_answer`, `SubmitAnswerMiddleware`, fallback, `AgentResponse.items/answer_source`, prompt. | unknown ids rejected; `return_direct` ends the turn; exactly one reminder; fallback after the reminder and after the call limit; items built from state |
+| 6 | `submit_answer`, `SubmitAnswerMiddleware`, fallback, `AgentResponse.items/answer_source`, prompt. | unknown ids rejected; a submit ends the turn with no further model call; exactly one reminder; fallback after the reminder and after the call limit; items built from state |
 | 7 | Scripted end-to-end suite (EN + HE) and a `stage5` eval suite (replay provider, seeded `geosearch_eval`), plus a report. | see §5 |
 | 8 | Docs: Stage 5 invariants and verified APIs in `CLAUDE.md`, README config table, `SPECS.md` Stage 5 done. | — |
 
@@ -219,13 +222,16 @@ EN and HE handoff prompts:
   reported separately;
 - the Stage 2 and Stage 4 suites still pass.
 
-## 6. Library behavior to verify in-step
+## 6. Library behavior (verified in-step)
 
-- Present in the langchain 1.4.3 source, still to be confirmed by tests in step 6:
-  `return_direct=True` routes to the exit after the tool node, and
-  `@hook_config(can_jump_to=["model"])` works on `after_model`.
-- Step 3: `ToolMessage.artifact` survives a `Command` update and is not sent to the
-  model by ChatOllama.
+- `return_direct=True` ends the run even after an error result, so it was dropped
+  for submit_answer (see §3.6). `@hook_config(can_jump_to=[...])` works on
+  `before_model` (`"end"`) and `after_model` (`"model"`).
+- `ToolMessage.artifact` survives a `Command` update through `ToolNode`, and
+  chat models are not sent it.
+- Found during step 6: with langgraph 1.2.12's default `durability="async"`, a turn
+  with many steps can deadlock the run's thread pool on chained checkpoint writes.
+  `invoke_turn` now passes `durability="sync"` when a thread is set.
 
 ## 7. Out of scope
 

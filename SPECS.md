@@ -141,19 +141,19 @@ Keeps unused tool schemas out of the model's context:
 
 Gate: schemas of unloaded tools are never sent to the model (checked from the token ledger).
 
-### Stage 5 — First capability: places · next
+### Stage 5 — First capability: places · done
 
 One end-to-end slice, in English and Hebrew:
 
 - **Tools:** the agent loads the places tools from the catalog: Google Places search (`9101`) and details (`9102`). Google is a demo provider behind a configurable `PlacesProvider`; tests and evals replay recorded fixtures.
 - **Area filter:** the resolver drops rows outside the polygon, for every tool.
-- **Summarizer sub-agent:** every tool result is summarized for the user's question by a summarizer sub-agent with its own isolated context. Large results are split into chunks, summarized, then merged. Items are cited as `[id]`, and invalid ids are stripped in code.
+- **Summarizer sub-agent:** every tool result is summarized for the user's question by a summarizer sub-agent with its own isolated context. Large results are split into chunks, summarized, then merged. Items are cited as `[id]`, and invalid ids are stripped in code. (Small results with no rows, such as a single weather reading, pass through unsummarized.)
 - **Main agent:** it combines the summaries and finishes with `submit_answer(text, item_ids)`. Ids are checked, and response items are built from data. If the model never submits, it gets one reminder, then the system falls back.
 - **No ranking yet.** Tools may return rows without scores.
 
-Gate: the handoff prompt returns 3–5 grounded items inside the polygon, in English and Hebrew, and the main agent never sees raw rows.
+Gate: the handoff prompt returns 3–5 grounded items inside the polygon, in English and Hebrew, and the main agent never sees raw rows. **Met** — scripted gate tests (EN + HE) check it on every run; on `gemma4:12b` with the replayed (synthetic) fixtures, all three `stage5` eval cases pass 3/3, every turn finishes with `submit_answer`, and peak input stays near 2.6K of the 13.3K budget. Detailed design: `docs/specs/stage-5-places.md`. The Stage 4 case `restaurant_cant` is parked: restaurants are now a capability.
 
-### Stage 6 — Iterative refinement · planned (to be redesigned: Stage 5 has no ranking or sufficiency signal)
+### Stage 6 — Iterative refinement · next (to be redesigned: Stage 5 has no ranking or sufficiency signal)
 
 When results are thin:
 

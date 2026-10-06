@@ -41,14 +41,16 @@ cases:
           - type: tool_called
             tool: geo_describe_area
 
-  - name: restaurant_cant
-    turns:
-      - prompt: "Find me a good restaurant here"
-        expect_loaded: []
-        checks:
-          - type: loaded_exactly
-            ids: []
-          - type: answer_contains_cant_do
+  # Skipped since Stage 5: places (9101) now handle restaurants, so "can't do"
+  # is no longer the right answer. Restore with a new expectation later.
+  # - name: restaurant_cant
+  #   turns:
+  #     - prompt: "Find me a good restaurant here"
+  #       expect_loaded: []
+  #       checks:
+  #         - type: loaded_exactly
+  #           ids: []
+  #         - type: answer_contains_cant_do
 
   - name: follow_up_no_reload
     turns:
