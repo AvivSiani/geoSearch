@@ -1,0 +1,34 @@
+{
+  "_synthetic": true,
+  "id": "ChIJsynthTLV000000000000007",
+  "displayName": {
+    "text": "Umami Lab",
+    "languageCode": "en"
+  },
+  "formattedAddress": "Ben Yehuda St 45, Tel Aviv-Yafo, Israel",
+  "location": {
+    "latitude": 32.0723,
+    "longitude": 34.7612
+  },
+  "rating": 4.8,
+  "userRatingCount": 95,
+  "primaryType": "japanese_restaurant",
+  "priceLevel": "PRICE_LEVEL_VERY_EXPENSIVE",
+  "nationalPhoneNumber": "03-555-0107",
+  "websiteUri": "https://example.com/synthetic/07",
+  "regularOpeningHours": {
+    "weekdayDescriptions": [
+      "Monday: 12:00 – 23:00",
+      "Tuesday: 12:00 – 23:00",
+      "Wednesday: 12:00 – 23:00",
+      "Thursday: 12:00 – 00:00",
+      "Friday: 12:00 – 16:00",
+      "Saturday: 19:00 – 23:00",
+      "Sunday: 12:00 – 23:00"
+    ]
+  },
+  "editorialSummary": {
+    "text": "Umami Lab serves Japanese dishes in a casual dining room.",
+    "languageCode": "en"
+  }
+}

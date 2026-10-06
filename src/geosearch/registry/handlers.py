@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from geosearch.config import GeoConfig
 from geosearch.geo.ops import AreaOps
 from geosearch.registry.models import model_name_for
+from geosearch.request.language import Language
 
 RESERVED_INPUT_FIELDS = frozenset({"area_id", "wkt", "geometry", "runtime"})
 RESERVED_OUTPUT_FIELDS = frozenset({"wkt", "geometry"})  # the model never sees geometry
@@ -50,13 +51,15 @@ class InvalidHandler(HandlerError):
 @dataclass(frozen=True)
 class HandlerContext:
     """What a handler may use besides its validated arguments. `area_id` is set
-    only for handlers registered with `uses_area=True`."""
+    only for handlers registered with `uses_area=True`. `language` is the turn's
+    request language, detected by code (e.g. a provider's result language)."""
 
     area_id: str | None
     area_ops: AreaOps
     cfg: GeoConfig
     turn: int
     source_id: int
+    language: Language = "en"
 
 
 @dataclass

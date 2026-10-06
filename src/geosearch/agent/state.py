@@ -16,6 +16,8 @@ from typing import Annotated, TypedDict
 
 from deepagents import DeepAgentState
 
+from geosearch.request.language import Language
+
 
 def merge_loaded_tools(left: list[int] | None, right: list[int] | None) -> list[int]:
     """Union, keeping first-load order. A reducer rather than a plain field so
@@ -44,6 +46,7 @@ class RequestRef(TypedDict):
 
     request_id: str
     prompt: str
+    language: Language  # detected from the prompt by code, never by the model
 
 
 class SearchProgress(TypedDict):

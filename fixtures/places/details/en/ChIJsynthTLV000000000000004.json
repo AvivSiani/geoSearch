@@ -1,0 +1,34 @@
+{
+  "_synthetic": true,
+  "id": "ChIJsynthTLV000000000000004",
+  "displayName": {
+    "text": "Kumo Sushi",
+    "languageCode": "en"
+  },
+  "formattedAddress": "Weizmann St 12, Tel Aviv-Yafo, Israel",
+  "location": {
+    "latitude": 32.0879,
+    "longitude": 34.7823
+  },
+  "rating": 4.7,
+  "userRatingCount": 1204,
+  "primaryType": "sushi_restaurant",
+  "priceLevel": "PRICE_LEVEL_EXPENSIVE",
+  "nationalPhoneNumber": "03-555-0104",
+  "websiteUri": "https://example.com/synthetic/04",
+  "regularOpeningHours": {
+    "weekdayDescriptions": [
+      "Monday: 12:00 – 23:00",
+      "Tuesday: 12:00 – 23:00",
+      "Wednesday: 12:00 – 23:00",
+      "Thursday: 12:00 – 00:00",
+      "Friday: 12:00 – 16:00",
+      "Saturday: 19:00 – 23:00",
+      "Sunday: 12:00 – 23:00"
+    ]
+  },
+  "editorialSummary": {
+    "text": "Kumo Sushi serves sushi dishes in a casual dining room.",
+    "languageCode": "en"
+  }
+}

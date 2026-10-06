@@ -1,0 +1,33 @@
+{
+  "_synthetic": true,
+  "id": "ChIJsynthTLV000000000000010",
+  "displayName": {
+    "text": "ווק דיס וויי",
+    "languageCode": "he"
+  },
+  "formattedAddress": "יגאל אלון 76, תל אביב-יפו, ישראל",
+  "location": {
+    "latitude": 32.0771,
+    "longitude": 34.7952
+  },
+  "rating": 4.1,
+  "userRatingCount": 350,
+  "primaryType": "asian_restaurant",
+  "nationalPhoneNumber": "03-555-0110",
+  "websiteUri": "https://example.com/synthetic/10",
+  "regularOpeningHours": {
+    "weekdayDescriptions": [
+      "יום שני: 12:00–23:00",
+      "יום שלישי: 12:00–23:00",
+      "יום רביעי: 12:00–23:00",
+      "יום חמישי: 12:00–00:00",
+      "יום שישי: 12:00–16:00",
+      "יום שבת: 19:00–23:00",
+      "יום ראשון: 12:00–23:00"
+    ]
+  },
+  "editorialSummary": {
+    "text": "ווק דיס וויי מגישה מנות אסייתיות באווירה קלילה.",
+    "languageCode": "he"
+  }
+}

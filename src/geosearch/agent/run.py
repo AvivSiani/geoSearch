@@ -31,6 +31,7 @@ from geosearch.geo.area_store import AreaStore
 from geosearch.geo.buffer import BufferStrategy
 from geosearch.geo.ops import AreaOps
 from geosearch.request.checks import check_prompt_length, check_prompt_present
+from geosearch.request.language import detect_language
 from geosearch.request.models import UsageSummary, UserRequest
 from geosearch.request.validate import validate_request
 
@@ -65,7 +66,8 @@ def build_new_turn_state(
 ) -> dict[str, Any]:
     """The state update for a turn: the user's prompt plus fresh `request` and
     `search`. `conversation` carries the fixed area; `intent` and
-    `loaded_tools` are left for the checkpointer to persist across turns."""
+    `loaded_tools` are left for the checkpointer to persist across turns. The
+    language is per turn: a follow-up may switch between English and Hebrew."""
     return {
         "messages": [{"role": "user", "content": prompt}],
         "conversation": {
@@ -75,7 +77,11 @@ def build_new_turn_state(
             "area_summary": area_summary,
             "turn": turn,
         },
-        "request": {"request_id": request_id, "prompt": prompt},
+        "request": {
+            "request_id": request_id,
+            "prompt": prompt,
+            "language": detect_language(prompt),
+        },
         "search": {"iteration": 0, "candidate_count": 0, "status": "idle"},
         "files": _seed_files(area_summary, turn, request_id, prompt),
     }

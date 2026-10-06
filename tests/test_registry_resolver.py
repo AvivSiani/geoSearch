@@ -143,6 +143,14 @@ def test_area_and_turn_come_from_state(setup: tuple) -> None:
     assert ctx.area_ops is setup[0].area_ops and ctx.cfg is setup[0].cfg
     assert SEEN["args"] == FindInput(kind=Kind.cafe)
     assert _content(out) == "none found"
+    assert ctx.language == "en"  # no request in state: the default
+
+
+def test_language_comes_from_the_request(setup: tuple) -> None:
+    context, state = setup
+    state["request"] = {"request_id": "r", "prompt": "מסעדה", "language": "he"}
+    _call(resolve(TD, _make_handlers(ToolResult(summary="x"))), setup, kind="cafe")
+    assert SEEN["ctx"].language == "he"
 
 
 def test_tools_without_uses_area_get_no_area(setup: tuple) -> None:

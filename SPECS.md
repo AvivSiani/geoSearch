@@ -46,26 +46,25 @@ Who owns what:
 ┌────────┐ ┌─────────┐ ┌───────────────────┐        │
 │Working │ │Tool     │ │Core tools  S2-S7  │        │
 │memory  │ │filter   │ │load_tools         │────────┤
-│(files) │ │S4       │ │set_intent         │        │
-│S2      │ │shows    │ │rank_candidates    │        │
-│        │ │only     │ │geo_describe_area  │        │
-│        │ │loaded   │ │resolve_time_window│        │
-│        │ │capabil- │ └───────────────────┘        │
-│        │ │ity tools│                              │
+│(files) │ │S4       │ │submit_answer      │        │
+│S2      │ │shows    │ │geo_describe_area  │        │
+│        │ │only     │ │resolve_time_window│        │
+│        │ │loaded   │ └───────────────────┘        │
+│        │ │tools    │                              │
 └────────┘ └────┬────┘                              │
                 ▼                                   │
 ┌───────────────────────────────┐                   │
-│ Capability registry       S3  │                   │
+│ Tool registry             S3  │                   │
 │ registry/ · MongoDB           │                   │
-│ definitions, schemas, status  │                   │
+│ source_id + description only  │                   │
 │ resolver -> handler allowlist │                   │
 └───────────────┬───────────────┘                   │
                 ▼                                   │
 ┌───────────────────────────────┐                   │
-│ Capability tools      S5, S7  │                   │
+│ Source tools          S5, S7  │                   │
 │ sources/                      │───────────────────┘
-│ places · weather · events     │   tools take area_id, never geometry
-│ big results -> working memory │
+│ places · weather · events     │   area injected, never an argument
+│ results -> summarizer (S5)    │
 └───────────────┬───────────────┘
                 ▼
        External APIs / MCP servers
@@ -116,15 +115,15 @@ The model sees `area_id` plus a compact summary, never the WKT. Area tools take 
 
 Gate: token ledger live, baseline and trimmed harness cost recorded, multi-turn evals within budget.
 
-### Stage 3 — Capability registry · done
+### Stage 3 — Tool registry · done
 
 A minimal tool registry on MongoDB, run with Docker Compose for dev and tests:
 
 - **Definitions:** each tool is just a numeric `source_id` and a `description`. There are no cards, versions or status.
-- **Code owns the rest:** each handler's registration declares the input model, the output model (its returned fields) and the `uses_area` flag. There is no grouping; the model sees each tool as `source_<id>` and selects tools from their descriptions alone, so descriptions must be clear and distinct. The database stores definitions, never code.
+- **Code owns the rest:** each handler's registration declares the input model, the output model (its returned fields) and the `uses_area` flag. There is no grouping; the model sees each tool as `source_<id>`. The database stores definitions, never code.
 - **Execution:** a resolver turns a definition into a LangChain tool through an explicit handler allowlist.
 - **Area injection:** the resolver injects `area_id` from agent state; tools never take it as an argument.
-- **Big results:** the resolver writes them to working-memory files (`/turns/<turn>/results/<source_id>/<k>.json`); the model gets a short summary plus the path.
+- **Big results:** the resolver writes them to working-memory files; the model gets a short summary plus the path.
 - **Seeding and change detection:** YAML seed files, an idempotent `geosearch-registry` CLI (`seed`, `validate`, `list`, `delete`), and a revision counter checked per request.
 
 Gate: registry tests pass on real MongoDB; adding a tool takes a handler module and a seed entry, with no change under `agent/`.
@@ -140,21 +139,21 @@ Keeps unused tool schemas out of the model's context:
 - **Guard:** calls to unloaded tools are blocked with a "load first" message.
 - **Registry changes:** every catalog tool is registered at build time, and the agent is rebuilt between requests when the registry revision changes.
 
-Gate: schemas of unloaded tools are never sent to the model (checked from the token ledger). **Met** — scripted tests check it from the ledger on every call; on `gemma4:12b` all five `stage4` eval cases pass 3/3 with selection precision and recall of 1.00. The catalog of 11 tools costs ~209 tokens per call; a loaded tool's schema adds ~110, against ~555 for offering all registry schemas up front. Stage 2 evals still pass 7/7.
+Gate: schemas of unloaded tools are never sent to the model (checked from the token ledger).
 
 ### Stage 5 — First capability: places · next
 
-One end-to-end slice:
+One end-to-end slice, in English and Hebrew:
 
-1. Turn the prompt into an `Intent` with hard constraints and soft preferences.
-2. The places tool writes its results to files.
-3. `rank_candidates` (a deterministic core tool) filters to the area and the hard constraints, scores the soft preferences, and returns the top-k compact rows.
-4. Fetch details for the top 3.
-5. Answer, with a grounding check on every named place.
+- **Tools:** the agent loads the places tools from the catalog: Google Places search (`9101`) and details (`9102`). Google is a demo provider behind a configurable `PlacesProvider`; tests and evals replay recorded fixtures.
+- **Area filter:** the resolver drops rows outside the polygon, for every tool.
+- **Summarizer sub-agent:** every tool result is summarized for the user's question by a summarizer sub-agent with its own isolated context. Large results are split into chunks, summarized, then merged. Items are cited as `[id]`, and invalid ids are stripped in code.
+- **Main agent:** it combines the summaries and finishes with `submit_answer(text, item_ids)`. Ids are checked, and response items are built from data. If the model never submits, it gets one reminder, then the system falls back.
+- **No ranking yet.** Tools may return rows without scores.
 
-Gate: the handoff example returns 3–5 places, all inside the polygon, and the grounding check passes.
+Gate: the handoff prompt returns 3–5 grounded items inside the polygon, in English and Hebrew, and the main agent never sees raw rows.
 
-### Stage 6 — Iterative refinement · planned
+### Stage 6 — Iterative refinement · planned (to be redesigned: Stage 5 has no ranking or sufficiency signal)
 
 When results are thin:
 

@@ -1,0 +1,34 @@
+{
+  "_synthetic": true,
+  "id": "ChIJsynthTLV000000000000013",
+  "displayName": {
+    "text": "Tokyo Night",
+    "languageCode": "en"
+  },
+  "formattedAddress": "Salame Rd 51, Tel Aviv-Yafo, Israel",
+  "location": {
+    "latitude": 32.0462,
+    "longitude": 34.7792
+  },
+  "rating": 4.5,
+  "userRatingCount": 333,
+  "primaryType": "japanese_restaurant",
+  "priceLevel": "PRICE_LEVEL_MODERATE",
+  "nationalPhoneNumber": "03-555-0113",
+  "websiteUri": "https://example.com/synthetic/13",
+  "regularOpeningHours": {
+    "weekdayDescriptions": [
+      "Monday: 12:00 – 23:00",
+      "Tuesday: 12:00 – 23:00",
+      "Wednesday: 12:00 – 23:00",
+      "Thursday: 12:00 – 00:00",
+      "Friday: 12:00 – 16:00",
+      "Saturday: 19:00 – 23:00",
+      "Sunday: 12:00 – 23:00"
+    ]
+  },
+  "editorialSummary": {
+    "text": "Tokyo Night serves Japanese dishes in a casual dining room.",
+    "languageCode": "en"
+  }
+}

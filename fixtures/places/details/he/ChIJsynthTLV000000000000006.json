@@ -1,0 +1,34 @@
+{
+  "_synthetic": true,
+  "id": "ChIJsynthTLV000000000000006",
+  "displayName": {
+    "text": "הדרקון המוזהב",
+    "languageCode": "he"
+  },
+  "formattedAddress": "דרך נמיר 140, תל אביב-יפו, ישראל",
+  "location": {
+    "latitude": 32.0951,
+    "longitude": 34.7893
+  },
+  "rating": 3.8,
+  "userRatingCount": 210,
+  "primaryType": "chinese_restaurant",
+  "priceLevel": "PRICE_LEVEL_INEXPENSIVE",
+  "nationalPhoneNumber": "03-555-0106",
+  "websiteUri": "https://example.com/synthetic/06",
+  "regularOpeningHours": {
+    "weekdayDescriptions": [
+      "יום שני: 12:00–23:00",
+      "יום שלישי: 12:00–23:00",
+      "יום רביעי: 12:00–23:00",
+      "יום חמישי: 12:00–00:00",
+      "יום שישי: 12:00–16:00",
+      "יום שבת: 19:00–23:00",
+      "יום ראשון: 12:00–23:00"
+    ]
+  },
+  "editorialSummary": {
+    "text": "הדרקון המוזהב מגישה מנות סיניות באווירה קלילה.",
+    "languageCode": "he"
+  }
+}

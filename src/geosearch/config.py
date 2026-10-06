@@ -210,6 +210,46 @@ class DisclosureConfig(BaseModel):
         return self
 
 
+class PlacesConfig(BaseModel):
+    """The places provider behind tools 9101/9102 (Stage 5). `replay` is the
+    default so a dev run or test never needs a key or the network; `google` is
+    the demo live provider."""
+
+    provider: Literal["google", "replay"] = "replay"
+    api_key: SecretStr | None = None  # google only
+    base_url: str = "https://places.googleapis.com/v1"
+    timeout_s: float = 10.0
+    max_results: int = 20  # one page; Text Search (New) caps pageSize at 20
+    fixtures_dir: Path = Path("fixtures/places")  # replay only
+
+    @model_validator(mode="after")
+    def _check(self) -> "PlacesConfig":
+        if self.provider == "google" and not (self.api_key and self.api_key.get_secret_value()):
+            raise ValueError("places.api_key is required when places.provider is 'google'")
+        if not (1 <= self.max_results <= 20):
+            raise ValueError(f"places.max_results must be in [1, 20], got {self.max_results}")
+        if self.timeout_s <= 0:
+            raise ValueError(f"places.timeout_s must be > 0, got {self.timeout_s}")
+        return self
+
+
+class SummarizerConfig(BaseModel):
+    """The summarizer that turns tool rows into a cited summary (Stage 5). It
+    runs on the main agent's model; only its sizes live here."""
+
+    chunk_tokens: int = 2_500  # rows per summarizer call, estimated tokens
+    max_chunks: int = 4  # rows beyond this many chunks are left out (and counted)
+    max_output_tokens: int = 400
+
+    @model_validator(mode="after")
+    def _check(self) -> "SummarizerConfig":
+        for name in ("chunk_tokens", "max_chunks", "max_output_tokens"):
+            value = getattr(self, name)
+            if value < 1:
+                raise ValueError(f"summarizer.{name} must be >= 1, got {value}")
+        return self
+
+
 class GeoConfig(BaseSettings):
     """Root config. Env prefix GEOSEARCH_, nested delimiter __.
 
@@ -228,3 +268,23 @@ class GeoConfig(BaseSettings):
     mongo: MongoConfig = Field(default_factory=MongoConfig)
     registry: RegistryConfig = Field(default_factory=RegistryConfig)
     disclosure: DisclosureConfig = Field(default_factory=DisclosureConfig)
+    places: PlacesConfig = Field(default_factory=PlacesConfig)
+    summarizer: SummarizerConfig = Field(default_factory=SummarizerConfig)
+
+    @model_validator(mode="after")
+    def _check_summarizer_fits_budget(self) -> "GeoConfig":
+        """The summarizer shares the main model's window: a chunk of rows (map)
+        and all partial summaries together (merge) must each fit one call."""
+        budget = self.budget.effective_input_budget
+        s = self.summarizer
+        if s.chunk_tokens >= budget:
+            raise ValueError(
+                f"summarizer.chunk_tokens must be < the input budget ({budget}), "
+                f"got {s.chunk_tokens}"
+            )
+        if s.max_chunks * s.max_output_tokens >= budget:
+            raise ValueError(
+                "summarizer.max_chunks * summarizer.max_output_tokens must be < the input "
+                f"budget ({budget}), got {s.max_chunks * s.max_output_tokens}"
+            )
+        return self

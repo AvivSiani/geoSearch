@@ -1,0 +1,34 @@
+{
+  "_synthetic": true,
+  "id": "ChIJsynthTLV000000000000002",
+  "displayName": {
+    "text": "בית הבמבוק",
+    "languageCode": "he"
+  },
+  "formattedAddress": "אבן גבירול 64, תל אביב-יפו, ישראל",
+  "location": {
+    "latitude": 32.0814,
+    "longitude": 34.7761
+  },
+  "rating": 4.4,
+  "userRatingCount": 530,
+  "primaryType": "chinese_restaurant",
+  "priceLevel": "PRICE_LEVEL_INEXPENSIVE",
+  "nationalPhoneNumber": "03-555-0102",
+  "websiteUri": "https://example.com/synthetic/02",
+  "regularOpeningHours": {
+    "weekdayDescriptions": [
+      "יום שני: 12:00–23:00",
+      "יום שלישי: 12:00–23:00",
+      "יום רביעי: 12:00–23:00",
+      "יום חמישי: 12:00–00:00",
+      "יום שישי: 12:00–16:00",
+      "יום שבת: 19:00–23:00",
+      "יום ראשון: 12:00–23:00"
+    ]
+  },
+  "editorialSummary": {
+    "text": "בית הבמבוק מגישה מנות סיניות באווירה קלילה.",
+    "languageCode": "he"
+  }
+}

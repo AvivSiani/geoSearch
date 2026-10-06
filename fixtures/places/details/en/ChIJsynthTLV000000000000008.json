@@ -1,0 +1,34 @@
+{
+  "_synthetic": true,
+  "id": "ChIJsynthTLV000000000000008",
+  "displayName": {
+    "text": "Seoul Kitchen",
+    "languageCode": "en"
+  },
+  "formattedAddress": "Menachem Begin Rd 132, Tel Aviv-Yafo, Israel",
+  "location": {
+    "latitude": 32.0694,
+    "longitude": 34.7851
+  },
+  "rating": 4.5,
+  "userRatingCount": 640,
+  "primaryType": "korean_restaurant",
+  "priceLevel": "PRICE_LEVEL_MODERATE",
+  "nationalPhoneNumber": "03-555-0108",
+  "websiteUri": "https://example.com/synthetic/08",
+  "regularOpeningHours": {
+    "weekdayDescriptions": [
+      "Monday: 12:00 – 23:00",
+      "Tuesday: 12:00 – 23:00",
+      "Wednesday: 12:00 – 23:00",
+      "Thursday: 12:00 – 00:00",
+      "Friday: 12:00 – 16:00",
+      "Saturday: 19:00 – 23:00",
+      "Sunday: 12:00 – 23:00"
+    ]
+  },
+  "editorialSummary": {
+    "text": "Seoul Kitchen serves Korean dishes in a casual dining room.",
+    "languageCode": "en"
+  }
+}

@@ -62,6 +62,17 @@ def test_two_turn_conversation_increments_and_remembers() -> None:
     assert len(second.state["messages"]) == 4
 
 
+def test_language_is_detected_per_turn() -> None:
+    runner = _runner(responses=[ai("a1"), ai("a2")])
+    first = runner.handle(UserRequest(wkt=HANDOFF_POLYGON, prompt="Asian restaurants"))
+    assert first.state["request"]["language"] == "en"
+    # A follow-up may switch language; it is re-detected, never carried over.
+    second = runner.handle(
+        UserRequest(prompt="ומה עם בתי קפה?", conversation_id=first.conversation_id)
+    )
+    assert second.state["request"]["language"] == "he"
+
+
 def test_working_memory_seeds_written() -> None:
     runner = _runner(responses=[ai("a1"), ai("a2")])
     first = runner.handle(UserRequest(wkt=HANDOFF_POLYGON, prompt="q1"))

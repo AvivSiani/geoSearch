@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -9,8 +11,10 @@ from geosearch.config import (
     LimitsConfig,
     LLMConfig,
     MongoConfig,
+    PlacesConfig,
     PointBufferConfig,
     RegistryConfig,
+    SummarizerConfig,
 )
 
 
@@ -136,3 +140,53 @@ def test_invalid_stage3_config_fails_fast() -> None:
         MongoConfig(server_selection_timeout_ms=0)
     with pytest.raises(ValidationError):
         RegistryConfig(max_inline_result_chars=10)
+
+
+def test_stage5_defaults() -> None:
+    places, summarizer = PlacesConfig(), SummarizerConfig()
+    assert places.provider == "replay"
+    assert places.api_key is None
+    assert places.max_results == 20
+    assert places.fixtures_dir == Path("fixtures/places")
+    assert summarizer.chunk_tokens == 2_500
+    assert summarizer.max_chunks == 4
+    assert summarizer.max_output_tokens == 400
+
+
+def test_google_provider_needs_a_key() -> None:
+    with pytest.raises(ValidationError, match="api_key"):
+        PlacesConfig(provider="google")
+    with pytest.raises(ValidationError, match="api_key"):
+        PlacesConfig(provider="google", api_key="")
+    places = PlacesConfig(provider="google", api_key="k")
+    assert "k" not in repr(places.api_key)
+
+
+def test_places_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEOSEARCH_PLACES__PROVIDER", "google")
+    monkeypatch.setenv("GEOSEARCH_PLACES__API_KEY", "secret")
+    monkeypatch.setenv("GEOSEARCH_SUMMARIZER__CHUNK_TOKENS", "1000")
+    cfg = GeoConfig(_env_file=None)
+    assert cfg.places.provider == "google"
+    assert cfg.places.api_key is not None
+    assert cfg.places.api_key.get_secret_value() == "secret"
+    assert cfg.summarizer.chunk_tokens == 1000
+
+
+def test_invalid_stage5_config_fails_fast() -> None:
+    with pytest.raises(ValidationError, match="max_results"):
+        PlacesConfig(max_results=21)
+    with pytest.raises(ValidationError, match="timeout_s"):
+        PlacesConfig(timeout_s=0)
+    with pytest.raises(ValidationError, match="max_chunks"):
+        SummarizerConfig(max_chunks=0)
+
+
+def test_summarizer_must_fit_the_input_budget() -> None:
+    with pytest.raises(ValidationError, match="chunk_tokens"):
+        GeoConfig(_env_file=None, summarizer=SummarizerConfig(chunk_tokens=20_000))
+    with pytest.raises(ValidationError, match="max_output_tokens"):
+        GeoConfig(
+            _env_file=None,
+            summarizer=SummarizerConfig(max_chunks=40, max_output_tokens=400),
+        )

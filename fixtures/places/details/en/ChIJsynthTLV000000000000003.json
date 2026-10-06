@@ -1,0 +1,34 @@
+{
+  "_synthetic": true,
+  "id": "ChIJsynthTLV000000000000003",
+  "displayName": {
+    "text": "Saigon Corner",
+    "languageCode": "en"
+  },
+  "formattedAddress": "Allenby St 88, Tel Aviv-Yafo, Israel",
+  "location": {
+    "latitude": 32.0642,
+    "longitude": 34.7684
+  },
+  "rating": 4.5,
+  "userRatingCount": 301,
+  "primaryType": "vietnamese_restaurant",
+  "priceLevel": "PRICE_LEVEL_INEXPENSIVE",
+  "nationalPhoneNumber": "03-555-0103",
+  "websiteUri": "https://example.com/synthetic/03",
+  "regularOpeningHours": {
+    "weekdayDescriptions": [
+      "Monday: 12:00 – 23:00",
+      "Tuesday: 12:00 – 23:00",
+      "Wednesday: 12:00 – 23:00",
+      "Thursday: 12:00 – 00:00",
+      "Friday: 12:00 – 16:00",
+      "Saturday: 19:00 – 23:00",
+      "Sunday: 12:00 – 23:00"
+    ]
+  },
+  "editorialSummary": {
+    "text": "Saigon Corner serves Vietnamese dishes in a casual dining room.",
+    "languageCode": "en"
+  }
+}

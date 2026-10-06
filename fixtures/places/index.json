@@ -1,0 +1,46 @@
+{
+  "_synthetic": true,
+  "_note": "Synthetic: hand-authored in the Places API (New) shape. Not real places.",
+  "search": [
+    {
+      "language": "en",
+      "text": "asian restaurant",
+      "aliases": [
+        "asian food",
+        "chinese",
+        "japanese",
+        "thai",
+        "vietnamese",
+        "korean",
+        "sushi",
+        "ramen",
+        "noodles",
+        "dim sum",
+        "pho"
+      ],
+      "file": "en-asian-restaurant.json"
+    },
+    {
+      "language": "he",
+      "text": "מסעדה אסייתית",
+      "aliases": [
+        "אוכל אסייתי",
+        "סיני",
+        "יפני",
+        "תאילנדי",
+        "וייטנאמי",
+        "קוריאני",
+        "סושי",
+        "ראמן",
+        "נודלס",
+        "asian restaurant",
+        "asian food",
+        "chinese",
+        "japanese",
+        "thai",
+        "sushi"
+      ],
+      "file": "he-asian-restaurant.json"
+    }
+  ]
+}

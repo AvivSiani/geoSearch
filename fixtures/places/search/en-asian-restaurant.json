@@ -1,0 +1,212 @@
+{
+  "_synthetic": true,
+  "places": [
+    {
+      "id": "ChIJsynthTLV000000000000001",
+      "displayName": {
+        "text": "Lotus Noodle Bar",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Dizengoff St 101, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0751,
+        "longitude": 34.7702
+      },
+      "rating": 4.6,
+      "userRatingCount": 812,
+      "primaryType": "asian_restaurant",
+      "priceLevel": "PRICE_LEVEL_MODERATE"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000002",
+      "displayName": {
+        "text": "Bamboo House",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Ibn Gabirol St 64, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0814,
+        "longitude": 34.7761
+      },
+      "rating": 4.4,
+      "userRatingCount": 530,
+      "primaryType": "chinese_restaurant",
+      "priceLevel": "PRICE_LEVEL_INEXPENSIVE"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000003",
+      "displayName": {
+        "text": "Saigon Corner",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Allenby St 88, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0642,
+        "longitude": 34.7684
+      },
+      "rating": 4.5,
+      "userRatingCount": 301,
+      "primaryType": "vietnamese_restaurant",
+      "priceLevel": "PRICE_LEVEL_INEXPENSIVE"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000004",
+      "displayName": {
+        "text": "Kumo Sushi",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Weizmann St 12, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0879,
+        "longitude": 34.7823
+      },
+      "rating": 4.7,
+      "userRatingCount": 1204,
+      "primaryType": "sushi_restaurant",
+      "priceLevel": "PRICE_LEVEL_EXPENSIVE"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000005",
+      "displayName": {
+        "text": "Thai Garden",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Herzl St 30, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0583,
+        "longitude": 34.7741
+      },
+      "rating": 4.2,
+      "userRatingCount": 420,
+      "primaryType": "thai_restaurant",
+      "priceLevel": "PRICE_LEVEL_MODERATE"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000006",
+      "displayName": {
+        "text": "Golden Dragon",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Namir Rd 140, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0951,
+        "longitude": 34.7893
+      },
+      "rating": 3.8,
+      "userRatingCount": 210,
+      "primaryType": "chinese_restaurant",
+      "priceLevel": "PRICE_LEVEL_INEXPENSIVE"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000007",
+      "displayName": {
+        "text": "Umami Lab",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Ben Yehuda St 45, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0723,
+        "longitude": 34.7612
+      },
+      "rating": 4.8,
+      "userRatingCount": 95,
+      "primaryType": "japanese_restaurant",
+      "priceLevel": "PRICE_LEVEL_VERY_EXPENSIVE"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000008",
+      "displayName": {
+        "text": "Seoul Kitchen",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Menachem Begin Rd 132, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0694,
+        "longitude": 34.7851
+      },
+      "rating": 4.5,
+      "userRatingCount": 640,
+      "primaryType": "korean_restaurant",
+      "priceLevel": "PRICE_LEVEL_MODERATE"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000009",
+      "displayName": {
+        "text": "Pho Street",
+        "languageCode": "en"
+      },
+      "formattedAddress": "HaYarkon St 210, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0832,
+        "longitude": 34.7573
+      },
+      "rating": 4.3,
+      "userRatingCount": 188,
+      "primaryType": "vietnamese_restaurant",
+      "priceLevel": "PRICE_LEVEL_INEXPENSIVE"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000010",
+      "displayName": {
+        "text": "Wok This Way",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Yigal Alon St 76, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0771,
+        "longitude": 34.7952
+      },
+      "rating": 4.1,
+      "userRatingCount": 350,
+      "primaryType": "asian_restaurant"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000011",
+      "displayName": {
+        "text": "Harbor Dim Sum",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Yordei HaSira St 3, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.1041,
+        "longitude": 34.7724
+      },
+      "rating": 4.6,
+      "userRatingCount": 702,
+      "primaryType": "chinese_restaurant",
+      "priceLevel": "PRICE_LEVEL_MODERATE"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000012",
+      "displayName": {
+        "text": "Spice Route Ramen",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Jabotinsky St 9, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0713,
+        "longitude": 34.8031
+      },
+      "rating": 4.4,
+      "userRatingCount": 266,
+      "primaryType": "ramen_restaurant",
+      "priceLevel": "PRICE_LEVEL_INEXPENSIVE"
+    },
+    {
+      "id": "ChIJsynthTLV000000000000013",
+      "displayName": {
+        "text": "Tokyo Night",
+        "languageCode": "en"
+      },
+      "formattedAddress": "Salame Rd 51, Tel Aviv-Yafo, Israel",
+      "location": {
+        "latitude": 32.0462,
+        "longitude": 34.7792
+      },
+      "rating": 4.5,
+      "userRatingCount": 333,
+      "primaryType": "japanese_restaurant",
+      "priceLevel": "PRICE_LEVEL_MODERATE"
+    }
+  ]
+}

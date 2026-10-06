@@ -1,0 +1,33 @@
+{
+  "_synthetic": true,
+  "id": "ChIJsynthTLV000000000000010",
+  "displayName": {
+    "text": "Wok This Way",
+    "languageCode": "en"
+  },
+  "formattedAddress": "Yigal Alon St 76, Tel Aviv-Yafo, Israel",
+  "location": {
+    "latitude": 32.0771,
+    "longitude": 34.7952
+  },
+  "rating": 4.1,
+  "userRatingCount": 350,
+  "primaryType": "asian_restaurant",
+  "nationalPhoneNumber": "03-555-0110",
+  "websiteUri": "https://example.com/synthetic/10",
+  "regularOpeningHours": {
+    "weekdayDescriptions": [
+      "Monday: 12:00 – 23:00",
+      "Tuesday: 12:00 – 23:00",
+      "Wednesday: 12:00 – 23:00",
+      "Thursday: 12:00 – 00:00",
+      "Friday: 12:00 – 16:00",
+      "Saturday: 19:00 – 23:00",
+      "Sunday: 12:00 – 23:00"
+    ]
+  },
+  "editorialSummary": {
+    "text": "Wok This Way serves pan-Asian dishes in a casual dining room.",
+    "languageCode": "en"
+  }
+}

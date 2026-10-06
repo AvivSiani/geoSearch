@@ -216,6 +216,7 @@ def resolve(td: ToolDefinition, handler_registry: HandlerRegistry = handlers) ->
             cfg=cfg,
             turn=turn,
             source_id=td.source_id,
+            language=(runtime.state.get("request") or {}).get("language", "en"),
         )
 
         try:
