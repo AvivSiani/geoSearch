@@ -5,17 +5,19 @@ tools the request needs, and loads them with `load_tools`. It pays for a tool's
 schema only after loading it:
 
   - CatalogMiddleware appends the catalog block to the system message.
-  - DisclosureMiddleware (step 4) filters the offered tools to core tools plus
-    loaded ones, and blocks calls to tools that aren't loaded.
+  - DisclosureMiddleware filters the offered tools to core tools plus loaded
+    ones, and blocks calls to registry tools that aren't loaded.
 
 Both are bound to one immutable CatalogSnapshot at agent build time, so a
 request can never see a catalog that doesn't match its agent's registered tools.
 """
 
 from collections.abc import Callable
+from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
-from langchain_core.messages import SystemMessage
+from langchain.agents.middleware.types import ToolCallRequest
+from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
 
 from geosearch.registry.catalog import CatalogSnapshot
@@ -60,3 +62,50 @@ class CatalogMiddleware(AgentMiddleware):
         base = request.system_prompt or ""
         text = f"{base}\n\n{block}" if base else block
         return handler(request.override(system_message=SystemMessage(text)))
+
+
+class DisclosureMiddleware(AgentMiddleware):
+    """Every catalog tool is registered with the agent (so loaded tools get
+    native tool calling with real schemas), but a registry tool's schema is
+    sent only while it is loaded, and it runs only while it is loaded
+    (Stage 4 invariants 1-2). Core tools — anything not from the registry —
+    always pass."""
+
+    def __init__(self, snapshot: CatalogSnapshot):
+        super().__init__()
+        self.snapshot = snapshot
+        self.registry_names = frozenset(entry.model_name for entry in snapshot.tools)
+
+    def _loaded(self, state: Any) -> set[int]:
+        return set((state or {}).get("loaded_tools") or [])
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], ModelResponse],
+    ) -> ModelResponse:
+        loaded = self._loaded(request.state)
+        # A loaded id whose tool was later deleted has no tool here: simply ignored.
+        visible = [
+            t
+            for t in request.tools
+            if t.name not in self.registry_names or self.snapshot.source_id_of(t.name) in loaded
+        ]
+        request.runtime.context.ledger.note_registry_tools(self.registry_names)
+        return handler(request.override(tools=visible))
+
+    def wrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Any],
+    ) -> Any:
+        name = request.tool_call["name"]
+        source_id = self.snapshot.source_id_of(name)
+        if source_id is None or source_id in self._loaded(request.state):
+            return handler(request)
+        return ToolMessage(
+            f"{name} is not loaded. Call load_tools([{source_id}]) first.",
+            tool_call_id=request.tool_call["id"],
+            name=name,
+            status="error",
+        )
