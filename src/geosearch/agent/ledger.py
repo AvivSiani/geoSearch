@@ -38,6 +38,9 @@ class LedgerRecord:
     latency_ms: float
     over_budget: bool
     possible_truncation: bool
+    est_catalog_tokens: int = 0  # the catalog block, part of est_system_tokens
+    catalog_over_warn: bool = False  # catalog block > disclosure.catalog_warn_tokens
+    est_registry_tool_tokens: int = 0  # loaded registry schemas, part of est_tool_tokens
 
     @property
     def effective_input(self) -> int:
@@ -52,9 +55,18 @@ class TokenLedger:
     """Fresh per turn; lives on AgentContext, never persisted or shown to the model."""
 
     records: list[LedgerRecord] = field(default_factory=list)
+    # Set by the disclosure middleware just before the call they describe.
+    pending_catalog_tokens: int = 0
+    pending_registry_tool_names: frozenset[str] = frozenset()
 
     def add(self, record: LedgerRecord) -> None:
         self.records.append(record)
+
+    def note_catalog(self, tokens: int) -> None:
+        self.pending_catalog_tokens = tokens
+
+    def note_registry_tools(self, names: frozenset[str]) -> None:
+        self.pending_registry_tool_names = names
 
     def summary(self) -> UsageSummary:
         return UsageSummary(
@@ -90,6 +102,12 @@ class TokenLedgerMiddleware(AgentMiddleware):
         est_system = count_tokens_approximately(system) if system else 0
         est_message = count_tokens_approximately(request.messages)
         est_tools = count_tokens_approximately([], tools=request.tools) if request.tools else 0
+        registry_tools = [
+            t for t in request.tools if t.name in ledger.pending_registry_tool_names
+        ]
+        est_registry_tools = (
+            count_tokens_approximately([], tools=registry_tools) if registry_tools else 0
+        )
         est_total = est_system + est_message + est_tools
 
         call_index = len(ledger.records)
@@ -122,6 +140,11 @@ class TokenLedgerMiddleware(AgentMiddleware):
                 latency_ms=latency_ms,
                 over_budget=over_budget,
                 possible_truncation=possible_truncation,
+                est_catalog_tokens=ledger.pending_catalog_tokens,
+                catalog_over_warn=(
+                    ledger.pending_catalog_tokens > context.cfg.disclosure.catalog_warn_tokens
+                ),
+                est_registry_tool_tokens=est_registry_tools,
             )
         )
         return response
