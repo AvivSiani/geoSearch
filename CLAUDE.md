@@ -60,6 +60,20 @@ Responsibility split, which guides every design choice:
     (`source_<id>`). The agent selects tools from their descriptions alone, so
     every description must be clear and distinct from the others.
 
+### Stage 4 invariants (progressive disclosure)
+
+18. **Schemas only while loaded.** A registry tool's schema is sent to the model
+    only while its id is in `loaded_tools` (DisclosureMiddleware filters
+    `request.tools`; the ledger's `est_registry_tool_tokens` proves it).
+19. **Runs only while loaded.** A call to a registry tool that isn't loaded
+    returns "source_<id> is not loaded. Call load_tools([<id>]) first." and runs
+    nothing (DisclosureMiddleware.wrap_tool_call).
+20. **Catalog shows `id: description` only.** Returned fields appear only in the
+    `load_tools` result, never in the always-on catalog.
+21. **Adding a tool never touches `agent/`.** A handler plus a seed entry; the
+    running app rebuilds its agent on the next request after the registry
+    revision changes (AgentHolder), never mid-request.
+
 ## Verified library APIs (Stage 2, pinned versions)
 
 Pinned: `deepagents==0.7.21`, `langchain==1.4.3`, `langgraph==1.2.12`,
@@ -108,6 +122,29 @@ Pinned: `pymongo==4.18.2`. Confirmed against it and the Stage 2 pins:
   return_document=ReturnDocument.AFTER)`. Idempotent upsert = `update_one({_id, description: {$ne: d}}, ..., upsert=True)`;
   a `DuplicateKeyError` there means "unchanged".
 
+## Verified library APIs (Stage 4)
+
+Confirmed against the Stage 2 pins:
+
+- **wrap_model_call**: `request.override(tools=[...])` replaces the tools sent;
+  `request.override(system_message=SystemMessage(...))` appends to the prompt.
+- **wrap_tool_call(request: ToolCallRequest, handler)**: `ToolCallRequest`
+  (`langchain.agents.middleware.types`) has `tool_call`, `tool`, `state`,
+  `runtime`. Returning a `ToolMessage` without calling `handler` skips the tool.
+- **Custom state from a tool**: return `Command(update={"loaded_tools": [...],
+  "messages": [ToolMessage(..., tool_call_id=runtime.tool_call_id)]})`. The field
+  needs a reducer (`Annotated[list[int], merge_loaded_tools]`) or two parallel
+  writes in one step raise `InvalidUpdateError`.
+- **Middleware order in `create_deep_agent`**: deepagents' base stack
+  `[Filesystem, SubAgent, Summarization, PatchToolCalls]`, then ours in list
+  order, then its tail `[AnthropicPromptCaching, UnsupportedContent]`. Same-named
+  middleware replace base ones *in place*, so our summarization stays outside
+  the disclosure middleware (harmless: it acts on messages, not the tool list).
+- **Ollama 0.35.1 + gemma4, thinking off**: a positional hint like
+  `load_tools([ids])` in the prompt makes the model emit multi-id calls that
+  Ollama's tool-call parser silently drops (empty reply, no tool calls). Prompts
+  show named-argument syntax (`source_ids=[...]`) instead.
+
 ## How to add a tool
 
 No change under `agent/`. Two pieces:
@@ -148,7 +185,9 @@ tools that are in no seed file; `delete <source_id>` removes one.
 
 - Python 3.12, managed with `uv`. Run `uv run pytest` and `uv run ruff check .`
   before considering any step done. The eval harness runs separately against the
-  real model: `uv run python -m evals.run --suite stage2`.
+  real model: `uv run python -m evals.run --suite stage2` and
+  `uv run python -m evals.run --suite stage4 --harness trimmed` (needs MongoDB;
+  seeds and drops a `geosearch_eval` database).
 - MongoDB (tool registry, Stage 3) runs via `docker compose up -d`; registry
   tests skip without it. The app is started with
   `uv run uvicorn geosearch.api.main:app`. Only `api/main.py` builds an app at

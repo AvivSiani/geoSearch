@@ -39,13 +39,13 @@ Who owns what:
 │ Deep Agent · agent/       S2  │   │ Area store · geo/         S1  │
 │ intent, plan, decide, explain │   │ in memory: area_id -> shape   │
 │ sees area_id + summary and    │   │ geo ops: contains, distance,  │
-│ the capability catalog only   │   │ area, representative point    │
+│ the tool catalog only         │   │ area, representative point    │
 └──┬──────────┬──────────┬──────┘   └───────────────▲───────────────┘
    │          │          │                          │
    ▼          ▼          ▼                          │ get(area_id)
 ┌────────┐ ┌─────────┐ ┌───────────────────┐        │
 │Working │ │Tool     │ │Core tools  S2-S7  │        │
-│memory  │ │filter   │ │load_capability    │────────┤
+│memory  │ │filter   │ │load_tools         │────────┤
 │(files) │ │S4       │ │set_intent         │        │
 │S2      │ │shows    │ │rank_candidates    │        │
 │        │ │only     │ │geo_describe_area  │        │
@@ -63,7 +63,7 @@ Who owns what:
                 ▼                                   │
 ┌───────────────────────────────┐                   │
 │ Capability tools      S5, S7  │                   │
-│ capabilities/                 │───────────────────┘
+│ sources/                      │───────────────────┘
 │ places · weather · events     │   tools take area_id, never geometry
 │ big results -> working memory │
 └───────────────┬───────────────┘
@@ -105,7 +105,7 @@ Gate: valid request + `area_id`, all tests green.
 
 - **Model:** a provider factory (`ollama` / `openai_compatible`), so changing model or server is config only.
 - **Context budget:** every number is in config. Defaults are a 16K window and a 13,312-token input budget per call.
-- **State:** a custom schema with `conversation`, `request`, `intent`, `loaded_capabilities` and `search`.
+- **State:** a custom schema with `conversation`, `request`, `intent`, `loaded_tools` and `search`.
 - **Conversations:** multi-turn via an optional `conversation_id`. Each conversation is bound to one area, and its state is checkpointed (in memory now, MongoDB later).
 - **Harness:** the default harness is measured first, then trimmed.
 - **Working memory:** a fixed file layout per conversation, with one folder per turn.
@@ -129,7 +129,7 @@ A minimal tool registry on MongoDB, run with Docker Compose for dev and tests:
 
 Gate: registry tests pass on real MongoDB; adding a tool takes a handler module and a seed entry, with no change under `agent/`.
 
-### Stage 4 — Progressive disclosure · next
+### Stage 4 — Progressive disclosure · done
 
 Keeps unused tool schemas out of the model's context:
 
@@ -140,9 +140,9 @@ Keeps unused tool schemas out of the model's context:
 - **Guard:** calls to unloaded tools are blocked with a "load first" message.
 - **Registry changes:** every catalog tool is registered at build time, and the agent is rebuilt between requests when the registry revision changes.
 
-Gate: schemas of unloaded tools are never sent to the model (checked from the token ledger).
+Gate: schemas of unloaded tools are never sent to the model (checked from the token ledger). **Met** — scripted tests check it from the ledger on every call; on `gemma4:12b` all five `stage4` eval cases pass 3/3 with selection precision and recall of 1.00. The catalog of 11 tools costs ~209 tokens per call; a loaded tool's schema adds ~110, against ~555 for offering all registry schemas up front. Stage 2 evals still pass 7/7.
 
-### Stage 5 — First capability: places · planned
+### Stage 5 — First capability: places · next
 
 One end-to-end slice:
 
