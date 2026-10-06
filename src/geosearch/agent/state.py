@@ -84,11 +84,20 @@ class SearchProgress(TypedDict):
     status: str
 
 
+class SubmittedAnswer(TypedDict):
+    """What submit_answer stored: checked ids, and text whose citations are
+    limited to them (Stage 5)."""
+
+    text: str
+    item_ids: list[str]
+
+
 class GeoAgentState(DeepAgentState):
     """DeepAgentState (messages, files, todos, ...) plus our shared fields.
 
     `conversation`, `loaded_tools`, `items` and `intent` carry across turns via
-    the checkpointer; `request` and `search` are overwritten each turn.
+    the checkpointer; `request`, `search`, `answer` and `reminded` are
+    overwritten each turn.
     """
 
     conversation: ConversationRef
@@ -97,3 +106,5 @@ class GeoAgentState(DeepAgentState):
     loaded_tools: Annotated[list[int], merge_loaded_tools]  # registry ids; carries across turns
     items: Annotated[dict[str, ItemRecord], merge_items]  # short id -> item; carries across turns
     search: SearchProgress
+    answer: SubmittedAnswer | None  # this turn's submit_answer; reset each turn
+    reminded: bool  # this turn's submit reminder was sent; reset each turn

@@ -5,7 +5,7 @@ on every system message, and the call limit stops the run."""
 import shapely
 from conftest import HANDOFF_POLYGON
 from langchain_core.messages import SystemMessage
-from scripted_model import ScriptedChatModel, ai, tool_call
+from scripted_model import ScriptedChatModel, ai, submit, tool_call
 
 from geosearch.agent.build import build_agent
 from geosearch.agent.context import AgentContext
@@ -82,7 +82,7 @@ def test_area_line_on_every_call_and_system_prompt_survives() -> None:
     model = ScriptedChatModel(
         responses=[
             ai("", tool_calls=[tool_call("geo_describe_area")]),
-            ai("Answer."),
+            submit("Answer."),
         ]
     )
     agent = build_agent(context.cfg, model)

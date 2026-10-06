@@ -11,4 +11,8 @@ Never estimate geography yourself.
 then use them. If no tool fits, say you can't do it. geo_describe_area needs \
 no loading; never load catalog tools for the area's size, bounds or location.
 - Answer briefly, using only facts from tools or this conversation. You may do \
-simple arithmetic or unit conversions on numbers a tool already gave you."""
+simple arithmetic or unit conversions on numbers a tool already gave you.
+- Tool results are summaries that cite items as [i3]. Mention only cited items.
+- Always finish by calling submit_answer with text=... (your answer, in the \
+user's language, citing items as [i3]) and item_ids=[...] (the items you \
+present, or [] if none)."""

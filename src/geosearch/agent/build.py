@@ -5,7 +5,7 @@ Two harness modes (Stage 2 §9), selected by `cfg.agent.harness`:
   - "default": create_deep_agent's full built-in tool suite, plus our tool,
     prompt and middleware. Exists only to measure the baseline cost.
   - "trimmed": the lean harness we actually run. Its core tools are only
-    {geo_describe_area, load_tools, ls, read_file, write_file}, and it swaps in
+    {geo_describe_area, load_tools, submit_answer, ls, read_file, write_file}, and it swaps in
     a summarization middleware sized from our budget.
 
 Registry tools (Stage 4): every tool in the catalog snapshot is registered, so a
@@ -45,6 +45,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
+from geosearch.agent.answer import SubmitAnswerMiddleware
 from geosearch.agent.context import AgentContext
 from geosearch.agent.disclosure import CatalogMiddleware, DisclosureMiddleware
 from geosearch.agent.ledger import TokenLedgerMiddleware
@@ -53,12 +54,15 @@ from geosearch.agent.prompts import SYSTEM_PROMPT
 from geosearch.agent.state import GeoAgentState
 from geosearch.agent.summarizer import ResultSummarizer, SummarizerMiddleware
 from geosearch.agent.tools import geo_describe_area
+from geosearch.agent.tools.answer import submit_answer
 from geosearch.agent.tools.loading import make_load_tools
 from geosearch.config import GeoConfig
 from geosearch.registry.catalog import CatalogSnapshot
 
 # The only core (non-registry) tools the trimmed harness offers the model.
-TRIMMED_TOOLS = {"geo_describe_area", "load_tools", "ls", "read_file", "write_file"}
+TRIMMED_TOOLS = {
+    "geo_describe_area", "load_tools", "submit_answer", "ls", "read_file", "write_file",
+}  # fmt: skip
 _TRIMMED_FILE_TOOLS = ["ls", "read_file", "write_file"]
 
 
@@ -82,6 +86,7 @@ def build_agent(
         CatalogMiddleware(catalog),
         DisclosureMiddleware(catalog),
         SummarizerMiddleware(summarizer, catalog),
+        SubmitAnswerMiddleware(),
     ]
 
     if cfg.agent.harness == "trimmed":
@@ -113,7 +118,12 @@ def build_agent(
 
     return create_deep_agent(
         model=model,
-        tools=[geo_describe_area, make_load_tools(catalog), *catalog.resolved_tools()],
+        tools=[
+            geo_describe_area,
+            make_load_tools(catalog),
+            submit_answer,
+            *catalog.resolved_tools(),
+        ],
         system_prompt=SYSTEM_PROMPT,
         middleware=middleware,
         state_schema=GeoAgentState,

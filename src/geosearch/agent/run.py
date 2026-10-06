@@ -13,7 +13,7 @@ stable, so the same area_id comes back (Stage 2 §10).
 
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import shapely
@@ -21,6 +21,7 @@ from deepagents.backends.state import create_file_data
 from langchain_core.messages import AIMessage
 from langgraph.graph.state import CompiledStateGraph
 
+from geosearch.agent.answer import AnswerSource, final_answer
 from geosearch.agent.context import AgentContext
 from geosearch.agent.conversations import ConversationRegistry
 from geosearch.agent.holder import AgentHolder
@@ -32,7 +33,7 @@ from geosearch.geo.buffer import BufferStrategy
 from geosearch.geo.ops import AreaOps
 from geosearch.request.checks import check_prompt_length, check_prompt_present
 from geosearch.request.language import detect_language
-from geosearch.request.models import UsageSummary, UserRequest
+from geosearch.request.models import ResponseItem, UsageSummary, UserRequest
 from geosearch.request.validate import validate_request
 
 StoppedReason = Literal["finished", "call_limit"]
@@ -52,6 +53,8 @@ class TurnOutcome:
     stopped_reason: StoppedReason
     usage: UsageSummary
     state: dict[str, Any]  # final graph state, for conversations/debugging
+    items: list[ResponseItem] = field(default_factory=list)
+    answer_source: AnswerSource = "fallback"
 
 
 def build_new_turn_state(
@@ -83,6 +86,8 @@ def build_new_turn_state(
             "language": detect_language(prompt),
         },
         "search": {"iteration": 0, "candidate_count": 0, "status": "idle"},
+        "answer": None,
+        "reminded": False,
         "files": _seed_files(area_summary, turn, request_id, prompt),
     }
 
@@ -128,20 +133,30 @@ def invoke_turn(
     checkpointing for conversations.
     """
     config = {"configurable": {"thread_id": thread_id}} if thread_id else {}
-    result = agent.invoke(state_update, context=context, config=config)
+    # durability="sync" when checkpointing: with the default "async", each step's
+    # checkpoint write runs on the run's thread pool and waits for the previous
+    # write; a turn with enough steps (each model call passes several middleware
+    # nodes) can fill the pool with waiting writes and deadlock (seen with
+    # langgraph 1.2.12). Writing inline costs ~nothing for the in-memory saver.
+    # Not without a thread: 1.2.12's "sync" then waits on a write it never made.
+    durability = "sync" if thread_id else None
+    result = agent.invoke(state_update, context=context, config=config, durability=durability)
 
     messages = result.get("messages", [])
     conversation = result["conversation"]
     request = result["request"]
+    answer, items, source = final_answer(result, _last_ai_text(messages))
     return TurnOutcome(
         conversation_id=conversation["conversation_id"],
         turn=conversation["turn"],
         request_id=request["request_id"],
         area_summary=conversation["area_summary"],
-        answer=_last_ai_text(messages),
+        answer=answer,
         stopped_reason="call_limit" if _was_call_limited(messages) else "finished",
         usage=context.ledger.summary(),
         state=result,
+        items=items,
+        answer_source=source,
     )
 
 

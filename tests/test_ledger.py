@@ -5,7 +5,7 @@ possible truncation."""
 
 import shapely
 from conftest import HANDOFF_POLYGON
-from scripted_model import ScriptedChatModel, ai, tool_call
+from scripted_model import ScriptedChatModel, ai, submit, tool_call
 
 from geosearch.agent.build import build_agent
 from geosearch.agent.context import AgentContext
@@ -43,7 +43,7 @@ def _run(responses: list, *, budget: ContextBudgetConfig | None = None) -> Token
 
 def test_one_record_per_model_call() -> None:
     ledger = _run(
-        [ai("", tool_calls=[tool_call("geo_describe_area")]), ai("About 26.2 km².")]
+        [ai("", tool_calls=[tool_call("geo_describe_area")]), submit("About 26.2 km².")]
     )
     assert len(ledger.records) == 2
     assert [r.call_index for r in ledger.records] == [0, 1]
@@ -89,7 +89,10 @@ def test_truncation_flag_is_first_call_only() -> None:
 
 def test_summary_aggregates_calls() -> None:
     ledger = _run(
-        [ai("", tool_calls=[tool_call("geo_describe_area")], tokens=100), ai("Answer.", tokens=120)]
+        [
+            ai("", tool_calls=[tool_call("geo_describe_area")], tokens=100),
+            ai("", tool_calls=submit("A.").tool_calls, tokens=120),
+        ]
     )
     summary = ledger.summary()
     assert summary.model_calls == 2

@@ -58,6 +58,18 @@ class UsageSummary(BaseModel):
     summarizer_input_tokens: int = 0
 
 
+class ResponseItem(BaseModel):
+    """One grounded item in an answer (Stage 5), built from what a tool returned
+    — never from model text. `data` holds the tool's other fields."""
+
+    id: str
+    source_id: int
+    name: str | None = None
+    lon: float | None = None
+    lat: float | None = None
+    data: dict[str, Any] = {}
+
+
 class AgentResponse(BaseModel):
     """What POST /v1/requests returns in Stage 2: the agent's answer plus the
     conversation handle and the turn's token cost. Carries no geometry."""
@@ -69,3 +81,5 @@ class AgentResponse(BaseModel):
     answer: str
     stopped_reason: Literal["finished", "call_limit"]
     usage: UsageSummary
+    items: list[ResponseItem] = []
+    answer_source: Literal["submitted", "fallback"] = "fallback"

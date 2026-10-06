@@ -12,7 +12,7 @@ import pytest
 from conftest import HANDOFF_POLYGON
 from fake_registry import DEMO_DEFINITION, FakeRegistry, scale_catalog, scale_registry
 from langchain_core.messages import SystemMessage, ToolMessage
-from scripted_model import ScriptedChatModel, ai, tool_call
+from scripted_model import ScriptedChatModel, ai, submit, tool_call
 
 from geosearch.agent.context import AgentContext
 from geosearch.agent.conversations import ConversationRegistry, make_checkpointer
@@ -93,7 +93,7 @@ def _tool_messages(outcome: TurnOutcome) -> list[ToolMessage]:
 
 
 def test_catalog_renders_and_no_registry_schema_before_any_load() -> None:
-    runner, model, _ = _runner([ai("Answer.")])
+    runner, model, _ = _runner([submit("Answer.")])
     _first(runner)
     system = next(m for m in model.calls[0] if isinstance(m, SystemMessage))
     assert CATALOG_HEADER in system.content
@@ -106,7 +106,7 @@ def test_catalog_renders_and_no_registry_schema_before_any_load() -> None:
 
 
 def test_loading_two_ids_offers_exactly_those_from_the_next_call() -> None:
-    runner, _, _ = _runner([_load(9001, 101), ai("Done.")])
+    runner, _, _ = _runner([_load(9001, 101), submit("Done.")])
     outcome = _first(runner)
     assert runner.offered() == [[], ["source_101", "source_9001"]]
     assert outcome.state["loaded_tools"] == [9001, 101]
@@ -117,9 +117,9 @@ def test_loading_two_ids_offers_exactly_those_from_the_next_call() -> None:
 
 
 def test_loaded_tool_runs_and_writes_its_result_file() -> None:
-    runner, _, _ = _runner([_load(9001), _call("source_9001", {"count": 5}), ai("Here.")])
+    runner, _, _ = _runner([_load(9001), _call("source_9001", {"count": 5}), submit("Here.")])
     outcome = _first(runner)
-    result = _tool_messages(outcome)[-1]
+    result = _tool_messages(outcome)[-2]  # [-1] is submit_answer's
     assert "Sampled 5 random point(s)" in result.content
     assert "/turns/" not in result.content  # Stage 5 D3: the path is never shown
     points = json.loads(outcome.state["files"]["/turns/1/results/9001/1.json"]["content"])
@@ -141,7 +141,7 @@ def test_cap_when_set() -> None:
     cfg = GeoConfig(_env_file=None).model_copy(
         update={"disclosure": DisclosureConfig(max_loaded_tools=1)}
     )
-    runner, _, _ = _runner([_load(9001, 101), ai("Done.")], cfg=cfg)
+    runner, _, _ = _runner([_load(9001, 101), submit("Done.")], cfg=cfg)
     outcome = _first(runner)
     assert outcome.state["loaded_tools"] == [9001]
     assert _tool_messages(outcome)[0].content.endswith("Not loaded (limit 1 reached): 101")
@@ -169,9 +169,9 @@ def test_loaded_tools_carry_into_turn_two() -> None:
         [
             _load(9001),
             _call("source_9001", {"count": 5}),
-            ai("Five points."),
+            submit("Five points."),
             _call("source_9001", {"count": 3, "seed": 2}, call_id="use_2"),
-            ai("Three more."),
+            submit("Three more.", call_id="submit_2"),
         ]
     )
     first = _first(runner)
@@ -179,14 +179,15 @@ def test_loaded_tools_carry_into_turn_two() -> None:
     assert second.state["loaded_tools"] == [9001]
     assert runner.offered()[0] == ["source_9001"]  # offered from turn 2's first call
     calls = [m.name for m in _tool_messages(second)[len(_tool_messages(first)) :]]
-    assert calls == ["source_9001"]  # no reload
+    assert calls == ["source_9001", "submit_answer"]  # no reload
     assert "/turns/2/results/9001/1.json" in second.state["files"]
 
 
 def test_tool_added_to_registry_works_on_next_request() -> None:
     registry = scale_registry(include=[101])
     runner, model, _ = _runner(
-        [ai("Can't."), _load(9001), _call("source_9001", {"count": 2}), ai("Two.")],
+        [submit("Can't."), _load(9001), _call("source_9001", {"count": 2}),
+         submit("Two.", call_id="submit_2")],
         registry=registry,
     )
     first = _first(runner)
@@ -196,7 +197,7 @@ def test_tool_added_to_registry_works_on_next_request() -> None:
     registry.upsert_tool(DEMO_DEFINITION)  # a CLI seed, say; no change under agent/
     second = _next(runner, first)
     assert second.state["loaded_tools"] == [9001]
-    assert "Sampled 2 random point(s)" in _tool_messages(second)[-1].content
+    assert "Sampled 2 random point(s)" in _tool_messages(second)[-2].content
 
 
 def test_tool_deleted_while_loaded_does_not_break_the_run() -> None:
@@ -204,9 +205,9 @@ def test_tool_deleted_while_loaded_does_not_break_the_run() -> None:
     runner, _, _ = _runner(
         [
             _load(9001, 101),
-            ai("Loaded."),
+            submit("Loaded."),
             _call("source_9001", {"count": 2}, call_id="use_2"),
-            ai("That tool is gone."),
+            submit("That tool is gone.", call_id="submit_2"),
         ],
         registry=registry,
     )
@@ -217,7 +218,7 @@ def test_tool_deleted_while_loaded_does_not_break_the_run() -> None:
     assert second.stopped_reason == "finished"
     assert second.answer == "That tool is gone."
     assert runner.offered()[0] == ["source_101"]  # the deleted tool is no longer offered
-    error = _tool_messages(second)[-1]
+    error = _tool_messages(second)[-2]  # [-1] is submit_answer's
     assert error.status == "error" and "source_9001" in error.content
 
 

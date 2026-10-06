@@ -83,3 +83,10 @@ def ai(content: str, *, tool_calls: list[dict] | None = None, tokens: int = 10) 
 
 def tool_call(name: str, args: dict | None = None, call_id: str = "call_1") -> dict:
     return {"name": name, "args": args or {}, "id": call_id, "type": "tool_call"}
+
+
+def submit(text: str, item_ids: list[str] | None = None, call_id: str = "submit_1") -> AIMessage:
+    """A scripted final turn (Stage 5): the model calls submit_answer, which ends
+    the turn without another model call."""
+    args = {"text": text, "item_ids": item_ids or []}
+    return ai("", tool_calls=[tool_call("submit_answer", args, call_id)])

@@ -7,7 +7,7 @@ import json
 import pytest
 import shapely
 from conftest import HANDOFF_POLYGON, TLV_POINT
-from scripted_model import ScriptedChatModel, ai
+from scripted_model import ScriptedChatModel, ai, submit
 
 from geosearch.agent.conversations import ConversationRegistry, make_checkpointer
 from geosearch.agent.holder import AgentHolder
@@ -49,7 +49,9 @@ def _runner(
 
 
 def test_two_turn_conversation_increments_and_remembers() -> None:
-    runner = _runner(responses=[ai("turn 1 answer"), ai("turn 2 answer")])
+    runner = _runner(
+        responses=[submit("turn 1 answer"), submit("turn 2 answer", call_id="submit_2")]
+    )
     first = runner.handle(UserRequest(wkt=HANDOFF_POLYGON, prompt="How big is this area?"))
     assert first.turn == 1
 
@@ -58,8 +60,9 @@ def test_two_turn_conversation_increments_and_remembers() -> None:
     )
     assert second.turn == 2
     assert second.conversation_id == first.conversation_id
-    # Turn 2 sees turn 1's messages: 2 messages per turn accumulate in the thread.
-    assert len(second.state["messages"]) == 4
+    # Turn 2 sees turn 1's messages: 3 per turn (prompt, submit call, its result).
+    assert len(second.state["messages"]) == 6
+    assert (first.answer, second.answer) == ("turn 1 answer", "turn 2 answer")
 
 
 def test_language_is_detected_per_turn() -> None:

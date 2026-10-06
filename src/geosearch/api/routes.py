@@ -54,4 +54,6 @@ def create_request(request: UserRequest, http_request: Request) -> AgentResponse
         answer=outcome.answer,
         stopped_reason=outcome.stopped_reason,
         usage=outcome.usage,
+        items=outcome.items,
+        answer_source=outcome.answer_source,
     )
