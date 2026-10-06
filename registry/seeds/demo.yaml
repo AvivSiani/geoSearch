@@ -1,0 +1,4 @@
+# Demo tool; seeded only with GEOSEARCH_REGISTRY__SEED_DEMO=true or --include-demo.
+tools:
+  - source_id: demo.sample_points
+    description: Return up to `count` random points inside the current area.
