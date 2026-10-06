@@ -7,9 +7,9 @@ pass a scripted model; nothing here imports a provider class — agent/model.py
 owns that), and so can the tool registry (the Stage 1-2 tests pass an in-memory
 one, so they never need MongoDB).
 
-There is deliberately no module-level `app`: building one at import would
-connect to MongoDB on import. Run with the factory:
-    uvicorn --factory geosearch.api.app:create_app"""
+There is deliberately no module-level `app` here: building one at import would
+connect to MongoDB on import, including for tests that only want create_app.
+The ASGI entry point is api/main.py (`uvicorn geosearch.api.main:app`)."""
 
 from fastapi import FastAPI
 from langchain_core.language_models.chat_models import BaseChatModel

@@ -16,11 +16,12 @@ code is built to.
 uv sync
 docker compose up -d                                  # MongoDB for the tool registry
 uv run geosearch-registry seed --include-demo         # optional: the demo tool
-uv run uvicorn --factory geosearch.api.app:create_app --reload
+uv run uvicorn geosearch.api.main:app --reload
 ```
 
-The app is built by a factory (`--factory`) because startup connects to
-MongoDB; there is no module-level `app`.
+`geosearch.api.main` is the entry point: importing it builds the app and
+connects to MongoDB. Code and tests import `create_app` from
+`geosearch.api.app`, which has no import-time side effects.
 
 ## Test
 
@@ -77,7 +78,7 @@ For example, to buffer Points with a 1000 m radius instead of the default:
 
 ```bash
 export GEOSEARCH_POINT_BUFFER__DEFAULT_RADIUS_M=1000
-uv run uvicorn --factory geosearch.api.app:create_app
+uv run uvicorn geosearch.api.main:app
 ```
 
 ## Example

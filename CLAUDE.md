@@ -145,7 +145,8 @@ tools that are in no seed file; `delete <source_id>` removes one.
   real model: `uv run python -m evals.run --suite stage2`.
 - MongoDB (tool registry, Stage 3) runs via `docker compose up -d`; registry
   tests skip without it. The app is started with
-  `uv run uvicorn --factory geosearch.api.app:create_app` (no module-level `app`).
+  `uv run uvicorn geosearch.api.main:app`. Only `api/main.py` builds an app at
+  import time; everything else imports `create_app` from `api/app.py`.
 - `src/` layout. Type hints everywhere.
 - Config via `pydantic-settings`, env prefix `GEOSEARCH_`, nested delimiter
   `__` (e.g. `GEOSEARCH_POINT_BUFFER__DEFAULT_RADIUS_M=1000`). Config is
