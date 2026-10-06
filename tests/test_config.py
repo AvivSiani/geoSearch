@@ -8,7 +8,9 @@ from geosearch.config import (
     GeoConfig,
     LimitsConfig,
     LLMConfig,
+    MongoConfig,
     PointBufferConfig,
+    RegistryConfig,
 )
 
 
@@ -107,3 +109,27 @@ def test_invalid_quad_segs_fails_fast() -> None:
 def test_invalid_limit_fails_fast() -> None:
     with pytest.raises(ValidationError, match="max_area_km2"):
         LimitsConfig(max_area_km2=0)
+
+
+def test_stage3_defaults(cfg: GeoConfig) -> None:
+    assert cfg.mongo.uri == "mongodb://localhost:27017"
+    assert cfg.mongo.database == "geosearch"
+    assert cfg.registry.max_inline_result_chars == 1_500
+    assert cfg.registry.required is True
+    assert cfg.registry.strict_startup is True
+    assert cfg.registry.seed_demo is False
+
+
+def test_registry_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEOSEARCH_REGISTRY__REQUIRED", "false")
+    monkeypatch.setenv("GEOSEARCH_MONGO__DATABASE", "other")
+    loaded = GeoConfig(_env_file=None)
+    assert loaded.registry.required is False
+    assert loaded.mongo.database == "other"
+
+
+def test_invalid_stage3_config_fails_fast() -> None:
+    with pytest.raises(ValidationError):
+        MongoConfig(server_selection_timeout_ms=0)
+    with pytest.raises(ValidationError):
+        RegistryConfig(max_inline_result_chars=10)

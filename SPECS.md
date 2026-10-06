@@ -114,23 +114,26 @@ Gate: valid request + `area_id`, all tests green.
 
 The model sees `area_id` plus a compact summary, never the WKT. Area tools take no area argument; they read it from state.
 
-Gate: token ledger live, baseline and trimmed harness cost recorded, multi-turn evals within budget. **Met** — on `gemma4:12b`, all seven eval cases pass on both harnesses; trimming cuts mean input per call from ~2724 to ~1097 (tool schemas 2744→804), and peak input per call (~1506 trimmed) stays well under the 13,312-token budget across a 5-turn conversation.
+Gate: token ledger live, baseline and trimmed harness cost recorded, multi-turn evals within budget.
 
-### Stage 3 — Capability registry · planned
+### Stage 3 — Capability registry · next
 
-A tool registry on MongoDB from day one:
+A minimal tool registry on MongoDB, run with Docker Compose for dev and tests:
 
-- **Collections:** `capabilities` (one-line cards) and `tools` (full definitions).
-- **Definitions:** a `ToolDefinition` schema with versions and status.
-- **Execution:** a resolver that maps each definition to an explicitly registered handler allowlist. The database stores definitions, never code.
+- **Definitions:** each tool is just a `source_id` (e.g. `demo.sample_points`) and a `description`. The `source_id` prefix is the capability. There are no cards, versions or status.
+- **Code owns the rest:** each handler's input model, output model (its returned fields) and `uses_area` flag live in the handler's registration. The database stores definitions, never code.
+- **Execution:** a resolver turns a definition into a LangChain tool through an explicit handler allowlist.
+- **Area injection:** the resolver injects `area_id` from agent state; tools never take it as an argument.
+- **Big results:** the resolver writes them to working-memory files; the model gets a short summary plus the path.
+- **Seeding and change detection:** YAML seed files, an idempotent `geosearch-registry` CLI (`seed`, `validate`, `list`, `delete`), and a revision counter checked per request.
 
-Gate: registry tests pass on real MongoDB; adding a capability needs no change under `agent/`.
+Gate: registry tests pass on real MongoDB; adding a tool takes a handler module and a seed entry, with no change under `agent/`.
 
 ### Stage 4 — Progressive disclosure · planned
 
 Keeps unused tool schemas out of the model's context:
 
-- **Catalog:** a one-line capability catalog in the system prompt.
+- **Catalog:** an always-on catalog in the system prompt with capability prefixes and tool descriptions only. A tool's returned fields are shown when its capability is loaded.
 - **Loading:** `load_capability` adds the capability to `state.loaded_capabilities`.
 - **Filtering:** a `wrap_model_call` middleware shows the model only the tools of loaded capabilities.
 - **Guard:** calls to tools of unloaded capabilities are blocked.

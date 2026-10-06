@@ -4,6 +4,7 @@ Config is validated at startup via pydantic; invalid config fails fast with a
 clear message rather than surfacing as a confusing runtime error later.
 """
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field, SecretStr, model_validator
@@ -118,7 +119,8 @@ class ContextBudgetConfig(BaseModel):
 
 
 class ConversationConfig(BaseModel):
-    """Multi-turn conversation bounds. The mongodb store is Stage 3."""
+    """Multi-turn conversation bounds. Conversations stay in memory; a mongodb
+    store is not planned (Stage 3 uses MongoDB for the tool registry only)."""
 
     store: Literal["memory", "mongodb"] = "memory"
     max_turns: int = 20
@@ -152,6 +154,42 @@ class AgentConfig(BaseModel):
         return self
 
 
+class MongoConfig(BaseModel):
+    """Where the tool registry lives (Stage 3). Conversations stay in memory."""
+
+    uri: str = "mongodb://localhost:27017"
+    database: str = "geosearch"
+    server_selection_timeout_ms: int = 2_000
+
+    @model_validator(mode="after")
+    def _check_timeout(self) -> "MongoConfig":
+        if self.server_selection_timeout_ms <= 0:
+            raise ValueError(
+                "mongo.server_selection_timeout_ms must be > 0, got "
+                f"{self.server_selection_timeout_ms}"
+            )
+        return self
+
+
+class RegistryConfig(BaseModel):
+    """How the tool registry is seeded, checked and used (Stage 3)."""
+
+    seeds_dir: Path = Path("registry/seeds")
+    seed_demo: bool = False
+    max_inline_result_chars: int = 1_500
+    required: bool = True  # fail startup if MongoDB is unreachable
+    strict_startup: bool = True  # a stored source_id without a handler fails startup
+
+    @model_validator(mode="after")
+    def _check_limit(self) -> "RegistryConfig":
+        if self.max_inline_result_chars < 100:
+            raise ValueError(
+                "registry.max_inline_result_chars must be >= 100, got "
+                f"{self.max_inline_result_chars}"
+            )
+        return self
+
+
 class GeoConfig(BaseSettings):
     """Root config. Env prefix GEOSEARCH_, nested delimiter __.
 
@@ -167,3 +205,5 @@ class GeoConfig(BaseSettings):
     budget: ContextBudgetConfig = Field(default_factory=ContextBudgetConfig)
     conversation: ConversationConfig = Field(default_factory=ConversationConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    mongo: MongoConfig = Field(default_factory=MongoConfig)
+    registry: RegistryConfig = Field(default_factory=RegistryConfig)
