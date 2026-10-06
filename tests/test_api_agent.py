@@ -14,6 +14,7 @@ from scripted_model import ScriptedChatModel, ai
 from geosearch.api.app import create_app
 from geosearch.config import GeoConfig
 from geosearch.errors import ErrorCode
+from geosearch.registry.store import InMemoryRegistry
 
 
 class UnreachableModel(ScriptedChatModel):
@@ -30,7 +31,11 @@ class UnreachableModel(ScriptedChatModel):
 
 
 def test_model_unavailable_returns_503() -> None:
-    app = create_app(GeoConfig(_env_file=None), model=UnreachableModel(responses=[ai("x")]))
+    app = create_app(
+        GeoConfig(_env_file=None),
+        model=UnreachableModel(responses=[ai("x")]),
+        tool_registry=InMemoryRegistry(),
+    )
     client = TestClient(app, raise_server_exceptions=False)
     response = client.post("/v1/requests", json={"wkt": HANDOFF_POLYGON, "prompt": "q"})
     assert response.status_code == 503
@@ -38,7 +43,11 @@ def test_model_unavailable_returns_503() -> None:
 
 
 def test_conversation_busy_returns_409() -> None:
-    app = create_app(GeoConfig(_env_file=None), model=ScriptedChatModel(responses=[ai("a")]))
+    app = create_app(
+        GeoConfig(_env_file=None),
+        model=ScriptedChatModel(responses=[ai("a")]),
+        tool_registry=InMemoryRegistry(),
+    )
     client = TestClient(app)
     first = client.post(
         "/v1/requests", json={"wkt": HANDOFF_POLYGON, "prompt": "q1"}

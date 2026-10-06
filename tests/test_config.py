@@ -111,13 +111,16 @@ def test_invalid_limit_fails_fast() -> None:
         LimitsConfig(max_area_km2=0)
 
 
-def test_stage3_defaults(cfg: GeoConfig) -> None:
-    assert cfg.mongo.uri == "mongodb://localhost:27017"
-    assert cfg.mongo.database == "geosearch"
-    assert cfg.registry.max_inline_result_chars == 1_500
-    assert cfg.registry.required is True
-    assert cfg.registry.strict_startup is True
-    assert cfg.registry.seed_demo is False
+def test_stage3_defaults() -> None:
+    # The classes, not GeoConfig: a GEOSEARCH_MONGO__* override in the test
+    # environment (e.g. pointing at a dead server) must not break this.
+    mongo, registry = MongoConfig(), RegistryConfig()
+    assert mongo.uri == "mongodb://localhost:27017"
+    assert mongo.database == "geosearch"
+    assert registry.max_inline_result_chars == 1_500
+    assert registry.required is True
+    assert registry.strict_startup is True
+    assert registry.seed_demo is False
 
 
 def test_registry_env_override(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -6,6 +6,7 @@ from scripted_model import ScriptedChatModel, ai
 from geosearch.api.app import create_app
 from geosearch.config import GeoConfig, LimitsConfig, PointBufferConfig
 from geosearch.errors import ErrorCode
+from geosearch.registry.store import InMemoryRegistry
 
 
 def _client(cfg: GeoConfig | None = None, responses: list | None = None) -> TestClient:
@@ -13,7 +14,7 @@ def _client(cfg: GeoConfig | None = None, responses: list | None = None) -> Test
     without a real model server. Validation-error tests never reach the model."""
     cfg = cfg or GeoConfig(_env_file=None)
     model = ScriptedChatModel(responses=responses or [ai("The area is about 26.2 km².")])
-    return TestClient(create_app(cfg, model=model))
+    return TestClient(create_app(cfg, model=model, tool_registry=InMemoryRegistry()))
 
 
 @pytest.fixture

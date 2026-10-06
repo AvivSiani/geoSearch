@@ -1,9 +1,15 @@
 """The app factory. request/ and geo/ hold the deterministic logic; agent/ holds
 the agent; this module wires them together once and exposes the route.
 
-The model, checkpointer, registry and agent are built once at startup and kept on
-app.state. A model instance can be injected (tests pass a scripted model; nothing
-here imports a provider class — agent/model.py owns that)."""
+The model, checkpointer, conversation registry, agent and tool catalog are built
+once at startup and kept on app.state. A model instance can be injected (tests
+pass a scripted model; nothing here imports a provider class — agent/model.py
+owns that), and so can the tool registry (the Stage 1-2 tests pass an in-memory
+one, so they never need MongoDB).
+
+There is deliberately no module-level `app`: building one at import would
+connect to MongoDB on import. Run with the factory:
+    uvicorn --factory geosearch.api.app:create_app"""
 
 from fastapi import FastAPI
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -18,10 +24,17 @@ from geosearch.config import GeoConfig
 from geosearch.geo.area_store import InMemoryAreaStore
 from geosearch.geo.buffer import STRATEGIES
 from geosearch.geo.ops import AreaOps
+from geosearch.registry.startup import open_catalog
+from geosearch.registry.store import Registry
 
 
-def create_app(cfg: GeoConfig | None = None, model: BaseChatModel | None = None) -> FastAPI:
+def create_app(
+    cfg: GeoConfig | None = None,
+    model: BaseChatModel | None = None,
+    tool_registry: Registry | None = None,
+) -> FastAPI:
     cfg = cfg or GeoConfig()
+    catalog = open_catalog(cfg, tool_registry)  # first: fail fast before building the agent
     store = InMemoryAreaStore(max_entries=cfg.area_store.max_entries)
     ops = AreaOps(store)
     buffer_strategy = STRATEGIES[cfg.point_buffer.strategy](cfg.point_buffer)
@@ -35,10 +48,8 @@ def create_app(cfg: GeoConfig | None = None, model: BaseChatModel | None = None)
     app = FastAPI(title="GeoSearch Agent")
     app.state.cfg = cfg
     app.state.runner = runner
+    app.state.catalog = catalog  # Stage 4 hands its tools to the agent
 
     register_exception_handlers(app)
     app.include_router(router)
     return app
-
-
-app = create_app()

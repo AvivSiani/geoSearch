@@ -14,8 +14,13 @@ code is built to.
 
 ```bash
 uv sync
-uv run uvicorn geosearch.api.app:app --reload
+docker compose up -d                                  # MongoDB for the tool registry
+uv run geosearch-registry seed --include-demo         # optional: the demo tool
+uv run uvicorn --factory geosearch.api.app:create_app --reload
 ```
+
+The app is built by a factory (`--factory`) because startup connects to
+MongoDB; there is no module-level `app`.
 
 ## Test
 
@@ -49,7 +54,7 @@ For example, to buffer Points with a 1000 m radius instead of the default:
 
 ```bash
 export GEOSEARCH_POINT_BUFFER__DEFAULT_RADIUS_M=1000
-uv run uvicorn geosearch.api.app:app
+uv run uvicorn --factory geosearch.api.app:create_app
 ```
 
 ## Example
