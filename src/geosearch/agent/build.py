@@ -4,9 +4,18 @@ Two harness modes (Stage 2 §9), selected by `cfg.agent.harness`:
 
   - "default": create_deep_agent's full built-in tool suite, plus our tool,
     prompt and middleware. Exists only to measure the baseline cost.
-  - "trimmed": the lean harness we actually run. It keeps only
-    {geo_describe_area, ls, read_file, write_file} and swaps in a summarization
-    middleware sized from our budget.
+  - "trimmed": the lean harness we actually run. Its core tools are only
+    {geo_describe_area, load_tools, ls, read_file, write_file}, and it swaps in
+    a summarization middleware sized from our budget.
+
+Registry tools (Stage 4): every tool in the catalog snapshot is registered, so a
+loaded tool gets native tool calling with its real schema. The disclosure
+middleware hides each one until `load_tools` loads it, and blocks calls to it
+until then. The snapshot is fixed per built agent; AgentHolder rebuilds the
+agent when the registry revision changes.
+
+Our middleware order: area summary -> catalog -> disclosure -> call limit ->
+allowlist -> ledger (last).
 
 Middleware ordering note for deepagents 0.7.21: user middleware whose `.name`
 matches a base-stack middleware *replaces it in place* (so our FilesystemMiddleware
@@ -35,15 +44,18 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from geosearch.agent.context import AgentContext
+from geosearch.agent.disclosure import CatalogMiddleware, DisclosureMiddleware
 from geosearch.agent.ledger import TokenLedgerMiddleware
 from geosearch.agent.middleware import AreaSummaryMiddleware, ToolAllowlistMiddleware
 from geosearch.agent.prompts import SYSTEM_PROMPT
 from geosearch.agent.state import GeoAgentState
 from geosearch.agent.tools import geo_describe_area
+from geosearch.agent.tools.loading import make_load_tools
 from geosearch.config import GeoConfig
+from geosearch.registry.catalog import CatalogSnapshot
 
-# The only tools the trimmed harness offers the model.
-TRIMMED_TOOLS = {"geo_describe_area", "ls", "read_file", "write_file"}
+# The only core (non-registry) tools the trimmed harness offers the model.
+TRIMMED_TOOLS = {"geo_describe_area", "load_tools", "ls", "read_file", "write_file"}
 _TRIMMED_FILE_TOOLS = ["ls", "read_file", "write_file"]
 
 
@@ -51,11 +63,18 @@ def build_agent(
     cfg: GeoConfig,
     model: BaseChatModel,
     checkpointer: BaseCheckpointSaver | None = None,
+    catalog: CatalogSnapshot | None = None,
 ) -> CompiledStateGraph:
-    """Build the agent once (at app startup, or per test). The model and
-    checkpointer are injected so tests can supply a scripted model and an
-    in-memory saver."""
-    middleware: list[AgentMiddleware] = [AreaSummaryMiddleware()]
+    """Build the agent (at startup, on a registry change, or per test). The
+    model, checkpointer and catalog are injected so tests can supply a scripted
+    model, an in-memory saver and a fake registry's snapshot. No catalog means
+    an empty one: the agent then has only its core tools."""
+    catalog = catalog or CatalogSnapshot()
+    middleware: list[AgentMiddleware] = [
+        AreaSummaryMiddleware(),
+        CatalogMiddleware(catalog),
+        DisclosureMiddleware(catalog),
+    ]
 
     if cfg.agent.harness == "trimmed":
         # Summarize at a fraction of the input budget. Replaces the default
@@ -77,14 +96,16 @@ def build_agent(
     )
 
     if cfg.agent.harness == "trimmed":
-        middleware.append(ToolAllowlistMiddleware(TRIMMED_TOOLS))
+        # Trims the harness built-ins; registry tools pass (disclosure governs them).
+        registry_names = {entry.model_name for entry in catalog.tools}
+        middleware.append(ToolAllowlistMiddleware(TRIMMED_TOOLS | registry_names))
 
     # Last, so it is innermost and measures the final request.
     middleware.append(TokenLedgerMiddleware())
 
     return create_deep_agent(
         model=model,
-        tools=[geo_describe_area],
+        tools=[geo_describe_area, make_load_tools(catalog), *catalog.resolved_tools()],
         system_prompt=SYSTEM_PROMPT,
         middleware=middleware,
         state_schema=GeoAgentState,

@@ -23,6 +23,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from geosearch.agent.context import AgentContext
 from geosearch.agent.conversations import ConversationRegistry
+from geosearch.agent.holder import AgentHolder
 from geosearch.agent.ledger import TokenLedger
 from geosearch.config import GeoConfig
 from geosearch.errors import ErrorCode, GeoValidationError
@@ -141,10 +142,12 @@ def invoke_turn(
 @dataclass
 class RequestRunner:
     """Turns a UserRequest into one agent turn. Built once (app startup) and
-    reused; holds the single built agent, the registry and the Stage 1 geo deps."""
+    reused; holds the agent holder, the conversation registry and the Stage 1
+    geo deps. Each request takes the current agent once (which may rebuild it
+    after a registry change) and keeps it for the whole turn."""
 
     cfg: GeoConfig
-    agent: CompiledStateGraph
+    agents: AgentHolder
     registry: ConversationRegistry
     store: AreaStore
     ops: AreaOps
@@ -154,11 +157,12 @@ class RequestRunner:
         return AgentContext(area_ops=self.ops, cfg=self.cfg, ledger=TokenLedger())
 
     def handle(self, req: UserRequest) -> TurnOutcome:
+        agent = self.agents.current()
         if req.conversation_id is None:
-            return self._new_conversation(req)
-        return self._follow_up(req)
+            return self._new_conversation(agent, req)
+        return self._follow_up(agent, req)
 
-    def _new_conversation(self, req: UserRequest) -> TurnOutcome:
+    def _new_conversation(self, agent: CompiledStateGraph, req: UserRequest) -> TurnOutcome:
         validated = validate_request(req, self.cfg, self.store, self.ops, self.buffer_strategy)
         area_wkt = shapely.to_wkt(self.store.get(validated.area_id))
         conversation_id = self.registry.create(validated.area_id)
@@ -177,9 +181,9 @@ class RequestRunner:
             # them from the checkpointer.
             state["intent"] = None
             state["loaded_tools"] = []
-            return invoke_turn(self.agent, self._context(), state, thread_id=conversation_id)
+            return invoke_turn(agent, self._context(), state, thread_id=conversation_id)
 
-    def _follow_up(self, req: UserRequest) -> TurnOutcome:
+    def _follow_up(self, agent: CompiledStateGraph, req: UserRequest) -> TurnOutcome:
         conversation_id = req.conversation_id
         assert conversation_id is not None
         if req.wkt is None and req.point_buffer_m is not None:
@@ -191,7 +195,7 @@ class RequestRunner:
         check_prompt_length(req.prompt, self.cfg.limits.max_prompt_chars)
 
         with self.registry.turn(conversation_id) as (entry, turn):
-            stored = self.agent.get_state(
+            stored = agent.get_state(
                 {"configurable": {"thread_id": conversation_id}}
             ).values["conversation"]
             area_id = stored["area_id"]
@@ -229,4 +233,4 @@ class RequestRunner:
                 prompt=req.prompt.strip(),
                 turn=turn,
             )
-            return invoke_turn(self.agent, self._context(), state, thread_id=conversation_id)
+            return invoke_turn(agent, self._context(), state, thread_id=conversation_id)

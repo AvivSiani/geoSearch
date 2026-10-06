@@ -9,8 +9,8 @@ import shapely
 from conftest import HANDOFF_POLYGON, TLV_POINT
 from scripted_model import ScriptedChatModel, ai
 
-from geosearch.agent.build import build_agent
 from geosearch.agent.conversations import ConversationRegistry, make_checkpointer
+from geosearch.agent.holder import AgentHolder
 from geosearch.agent.run import RequestRunner
 from geosearch.config import GeoConfig
 from geosearch.errors import ErrorCode, GeoValidationError
@@ -44,8 +44,8 @@ def _runner(
     kwargs = {"clock": clock} if clock is not None else {}
     registry = ConversationRegistry(cfg.conversation, checkpointer, **kwargs)
     model = ScriptedChatModel(responses=responses or [ai("ok")])
-    agent = build_agent(cfg, model, checkpointer)
-    return RequestRunner(cfg, agent, registry, store, ops, buffer_strategy)
+    agents = AgentHolder(cfg, model, checkpointer)
+    return RequestRunner(cfg, agents, registry, store, ops, buffer_strategy)
 
 
 def test_two_turn_conversation_increments_and_remembers() -> None:

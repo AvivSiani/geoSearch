@@ -37,9 +37,7 @@ def create_request(request: UserRequest, http_request: Request) -> AgentResponse
     """Sync def: the agent invoke is driven synchronously; FastAPI runs it in a
     worker thread."""
     runner = http_request.app.state.runner
-    # One revision read; rebuilds only if the registry changed (e.g. a CLI seed).
-    http_request.app.state.catalog.refresh_if_changed()
-    try:
+    try:  # the runner refreshes the catalog and, if it changed, rebuilds the agent
         outcome = runner.handle(request)
     except _MODEL_DOWN_ERRORS as exc:
         raise GeoValidationError(

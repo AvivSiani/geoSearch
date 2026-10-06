@@ -96,8 +96,11 @@ def test_area_line_on_every_call_and_system_prompt_survives() -> None:
         # ...without clobbering the existing system prompt: all of it survives,
         # with our area line after it (append, not replace). In deepagents
         # 0.7.21 the harness "base prompt" lives in tool schemas, not the system
-        # message, so the system text here is exactly our prompt + the area line.
-        assert system.content == f"{SYSTEM_PROMPT}\nCurrent area: {AREA_SUMMARY}"
+        # message, so the system text here is exactly our prompt + the area line,
+        # followed by the tool catalog (Stage 4; empty registry here).
+        assert system.content == (
+            f"{SYSTEM_PROMPT}\nCurrent area: {AREA_SUMMARY}\n\nNo tools available."
+        )
 
 
 def test_call_limit_stops_the_run() -> None:

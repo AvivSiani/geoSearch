@@ -14,8 +14,8 @@ The ASGI entry point is api/main.py (`uvicorn geosearch.api.main:app`)."""
 from fastapi import FastAPI
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from geosearch.agent.build import build_agent
 from geosearch.agent.conversations import ConversationRegistry, make_checkpointer
+from geosearch.agent.holder import AgentHolder
 from geosearch.agent.model import build_chat_model
 from geosearch.agent.run import RequestRunner
 from geosearch.api.errors import register_exception_handlers
@@ -42,13 +42,13 @@ def create_app(
     model = model or build_chat_model(cfg.llm, cfg.budget)
     checkpointer = make_checkpointer(cfg)
     registry = ConversationRegistry(cfg.conversation, checkpointer)
-    agent = build_agent(cfg, model, checkpointer)
-    runner = RequestRunner(cfg, agent, registry, store, ops, buffer_strategy)
+    agents = AgentHolder(cfg, model, checkpointer, catalog)  # rebuilds on registry change
+    runner = RequestRunner(cfg, agents, registry, store, ops, buffer_strategy)
 
     app = FastAPI(title="GeoSearch Agent")
     app.state.cfg = cfg
     app.state.runner = runner
-    app.state.catalog = catalog  # Stage 4 hands its tools to the agent
+    app.state.catalog = catalog
 
     register_exception_handlers(app)
     app.include_router(router)
