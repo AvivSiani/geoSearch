@@ -31,6 +31,33 @@ def merge_loaded_tools(left: list[int] | None, right: list[int] | None) -> list[
     return merged
 
 
+def merge_items(
+    left: dict[str, dict] | None, right: dict[str, dict] | None
+) -> dict[str, dict]:
+    """Items accumulate across tools and turns. A later row for a known item
+    (details after search) adds or refreshes fields but never blanks one: a
+    None from the later tool keeps the earlier value. The first finder's
+    `source_id` and the provider `ref` never change."""
+    merged = dict(left or {})
+    for item_id, record in (right or {}).items():
+        old = merged.get(item_id)
+        if old is None:
+            merged[item_id] = record
+            continue
+        fresh = {k: v for k, v in record["row"].items() if v is not None}
+        merged[item_id] = {**old, "row": {**old["row"], **fresh}}
+    return merged
+
+
+class ItemRecord(TypedDict):
+    """One grounded item (Stage 5): what a tool returned for one provider id.
+    Server-side: models see only the short id and the summarizer's text."""
+
+    source_id: int  # the tool that first returned it
+    ref: str  # the provider's id (e.g. a Google place_id); never shown to a model
+    row: dict  # the row's declared fields, minus `id`
+
+
 class ConversationRef(TypedDict):
     """Identity of the conversation and its single, fixed area."""
 
@@ -60,7 +87,7 @@ class SearchProgress(TypedDict):
 class GeoAgentState(DeepAgentState):
     """DeepAgentState (messages, files, todos, ...) plus our shared fields.
 
-    `conversation`, `loaded_tools` and `intent` carry across turns via
+    `conversation`, `loaded_tools`, `items` and `intent` carry across turns via
     the checkpointer; `request` and `search` are overwritten each turn.
     """
 
@@ -68,4 +95,5 @@ class GeoAgentState(DeepAgentState):
     request: RequestRef
     intent: dict | None  # Stage 5 fills it; carries across turns
     loaded_tools: Annotated[list[int], merge_loaded_tools]  # registry ids; carries across turns
+    items: Annotated[dict[str, ItemRecord], merge_items]  # short id -> item; carries across turns
     search: SearchProgress

@@ -185,8 +185,10 @@ def test_through_a_real_toolnode(setup: tuple) -> None:
     )
     message = out["messages"][-1]
     assert message.tool_call_id == "c9"
-    assert "full result: /turns/2/results/9001/1.json" in message.content
+    assert "/turns/" not in message.content  # Stage 5 D3: the path is never shown
     rows = json.loads(out["files"]["/turns/2/results/9001/1.json"]["content"])
+    # The artifact survives ToolNode + Command: it carries the rows to the summarizer.
+    assert len(message.artifact["rows"]) == 4 and message.artifact["source_id"] == 9001
     assert len(rows) == 4
     area_id = state["conversation"]["area_id"]
     assert all(context.area_ops.contains(area_id, r["lon"], r["lat"]) for r in rows)
@@ -249,13 +251,14 @@ def test_output_mismatch_becomes_an_error(
 # --- result shaping ---------------------------------------------------------------
 
 
-def test_artifact_goes_to_a_file_with_a_pointer(setup: tuple) -> None:
+def test_artifact_goes_to_a_file_and_the_message_artifact(setup: tuple) -> None:
     rows = [{"name": f"n{i}", "score": float(i)} for i in range(3)]
     result = ToolResult(summary="Found 3.", data={"name": "n0", "score": 0.0}, artifact=rows)
     out = _call(resolve(TD, _make_handlers(result)), setup, kind="cafe")
     assert isinstance(out, Command)
     path = "/turns/2/results/17/1.json"
-    assert _content(out) == f'Found 3.\ndata: {{"name":"n0","score":0.0}}\nfull result: {path}'
+    assert _content(out) == 'Found 3.\ndata: {"name":"n0","score":0.0}'
+    assert out.update["messages"][0].artifact == {"source_id": 17, "rows": rows}
     file = out.update["files"][path]
     assert json.loads(file["content"]) == rows
     assert set(file) >= {"content", "encoding", "created_at", "modified_at"}
@@ -290,7 +293,9 @@ def test_oversized_data_is_offloaded_automatically(setup: tuple) -> None:
     result = ToolResult(summary="Big.", data={"name": "n" * 2_000, "score": 1.0})
     out = _call(resolve(TD, _make_handlers(result)), setup, kind="cafe")
     content = _content(out)
-    assert content == "Big.\nfull result: /turns/2/results/17/1.json"
+    assert content == "Big."
+    # Offloaded data becomes the bulk value: one row for the summarizer.
+    assert out.update["messages"][0].artifact["rows"] == [{"name": "n" * 2_000, "score": 1.0}]
     stored = json.loads(out.update["files"]["/turns/2/results/17/1.json"]["content"])
     assert stored["name"] == "n" * 2_000
 
@@ -300,7 +305,7 @@ def test_long_summary_is_truncated_within_the_limit(setup: tuple) -> None:
     result = ToolResult(summary="s" * 5_000, artifact=[{"name": "a", "score": 1.0}])
     content = _content(_call(resolve(TD, _make_handlers(result)), setup, kind="cafe"))
     assert len(content) <= limit
-    assert TRUNCATED + "\nfull result: /turns/2/results/17/1.json" in content
+    assert content.endswith(TRUNCATED)
 
 
 def test_data_too_big_alongside_artifact_gets_its_own_file(setup: tuple) -> None:
@@ -313,7 +318,5 @@ def test_data_too_big_alongside_artifact_gets_its_own_file(setup: tuple) -> None
     out = _call(resolve(TD, _make_handlers(result)), setup, kind="cafe")
     content = _content(out)
     assert len(content) <= limit
-    assert content == (
-        "Both.\ndata: /turns/2/results/17/2.json\nfull result: /turns/2/results/17/1.json"
-    )
+    assert content == "Both."  # the data is kept in working memory only
     assert len(out.update["files"]) == 2

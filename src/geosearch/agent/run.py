@@ -187,6 +187,7 @@ class RequestRunner:
             # them from the checkpointer.
             state["intent"] = None
             state["loaded_tools"] = []
+            state["items"] = {}
             return invoke_turn(agent, self._context(), state, thread_id=conversation_id)
 
     def _follow_up(self, agent: CompiledStateGraph, req: UserRequest) -> TurnOutcome:

@@ -120,7 +120,7 @@ def test_loaded_tool_runs_and_writes_its_result_file() -> None:
     outcome = _first(runner)
     result = _tool_messages(outcome)[-1]
     assert "Sampled 5 random point(s)" in result.content
-    assert "full result: /turns/1/results/9001/1.json" in result.content
+    assert "/turns/" not in result.content  # Stage 5 D3: the path is never shown
     points = json.loads(outcome.state["files"]["/turns/1/results/9001/1.json"]["content"])
     assert len(points) == 5
 

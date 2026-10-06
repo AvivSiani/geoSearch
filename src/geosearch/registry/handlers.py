@@ -48,11 +48,17 @@ class InvalidHandler(HandlerError):
     """A registration breaks a shape rule (duplicate, reserved field, nesting)."""
 
 
+def _no_items(item_id: str) -> str | None:
+    return None
+
+
 @dataclass(frozen=True)
 class HandlerContext:
     """What a handler may use besides its validated arguments. `area_id` is set
     only for handlers registered with `uses_area=True`. `language` is the turn's
-    request language, detected by code (e.g. a provider's result language)."""
+    request language, detected by code (e.g. a provider's result language).
+    `item_ref` turns a short item id the model passed (`i3`) back into the
+    provider's id, or None if no such item exists in this conversation."""
 
     area_id: str | None
     area_ops: AreaOps
@@ -60,6 +66,7 @@ class HandlerContext:
     turn: int
     source_id: int
     language: Language = "en"
+    item_ref: Callable[[str], str | None] = _no_items
 
 
 @dataclass
@@ -90,6 +97,16 @@ class RegisteredHandler:
     @property
     def output_fields(self) -> list[str]:
         return list(self.output_model.model_fields)
+
+    @property
+    def has_coordinates(self) -> bool:
+        """Rows carry `lon`/`lat`: the resolver drops those outside the area."""
+        return {"lon", "lat"} <= set(self.output_model.model_fields)
+
+    @property
+    def yields_items(self) -> bool:
+        """Rows carry the provider's `id`: the resolver turns them into items."""
+        return "id" in self.output_model.model_fields
 
 
 def _contains_model(annotation: Any) -> bool:
@@ -130,6 +147,9 @@ class HandlerRegistry:
             raise InvalidHandler(f"duplicate handler for source_id {source_id}")
         _check_model(source_id, "input_model", input_model, RESERVED_INPUT_FIELDS)
         _check_model(source_id, "output_model", output_model, RESERVED_OUTPUT_FIELDS)
+        id_field = output_model.model_fields.get("id")
+        if id_field is not None and id_field.annotation is not str:
+            raise InvalidHandler(f"{source_id}: output field 'id' (a provider id) must be str")
 
         def decorator(func: Handler) -> Handler:
             if source_id in self._specs:  # registered between call and decoration
