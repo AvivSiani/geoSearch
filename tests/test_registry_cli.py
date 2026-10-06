@@ -20,28 +20,28 @@ def db(mongo_db: Database, monkeypatch: pytest.MonkeyPatch) -> Database:
 
 def test_seed_is_idempotent(db: Database, capsys: pytest.CaptureFixture) -> None:
     assert main(["seed", SEEDS, "--include-demo"]) == 0
-    assert "created: 1  (9001)" in capsys.readouterr().out
+    assert "created: 3  (9001, 9101, 9102)" in capsys.readouterr().out
     assert main(["seed", SEEDS, "--include-demo"]) == 0
     out = capsys.readouterr().out
-    assert "unchanged: 1" in out and "revision: 1" in out
+    assert "unchanged: 3" in out and "revision: 3" in out
 
 
 def test_demo_needs_the_flag(db: Database) -> None:
     assert main(["seed", SEEDS]) == 0
-    assert MongoRegistry(db).list_tools() == []
+    assert [t.source_id for t in MongoRegistry(db).list_tools()] == [9101, 9102]  # no 9001
 
 
 def test_seed_demo_config_includes_demo(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GEOSEARCH_REGISTRY__SEED_DEMO", "true")
     assert main(["seed", SEEDS]) == 0
-    assert [t.source_id for t in MongoRegistry(db).list_tools()] == [9001]
+    assert [t.source_id for t in MongoRegistry(db).list_tools()] == [9001, 9101, 9102]
 
 
 def test_prune(db: Database, capsys: pytest.CaptureFixture) -> None:
     main(["seed", SEEDS, "--include-demo"])
     assert main(["seed", SEEDS, "--prune"]) == 0
     assert "deleted: 1  (9001)" in capsys.readouterr().out
-    assert MongoRegistry(db).list_tools() == []
+    assert [t.source_id for t in MongoRegistry(db).list_tools()] == [9101, 9102]
 
 
 def test_validate(db: Database, capsys: pytest.CaptureFixture) -> None:
@@ -89,6 +89,7 @@ def test_unreachable_mongo_exits_2(
 def test_validate_warns_about_handler_without_definition(
     db: Database, capsys: pytest.CaptureFixture
 ) -> None:
+    main(["seed", SEEDS])
     assert main(["validate", SEEDS]) == 0
     assert "warning: handler without a DB definition: 9001" in capsys.readouterr().out
 

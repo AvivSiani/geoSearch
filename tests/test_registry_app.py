@@ -81,9 +81,9 @@ def test_cli_change_is_picked_up_on_next_request(
     assert main(["seed", SEEDS, "--include-demo"]) == 0
     assert app.state.catalog.tools == ()  # nothing changes between requests
     assert client.post("/v1/requests", json=body).status_code == 200
-    assert [e.source_id for e in app.state.catalog.tools] == [9001]
+    assert [e.source_id for e in app.state.catalog.tools] == [9001, 9101, 9102]
     assert app.state.catalog.tool(9001).name == "source_9001"
 
     assert main(["delete", "9001"]) == 0
     client.post("/v1/requests", json=body)
-    assert app.state.catalog.tools == ()
+    assert [e.source_id for e in app.state.catalog.tools] == [9101, 9102]

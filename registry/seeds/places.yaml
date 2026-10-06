@@ -1,0 +1,11 @@
+# Stage 5: places (Google Places API (New) as the demo provider; replayed
+# fixtures by default — see GEOSEARCH_PLACES__PROVIDER).
+tools:
+  - source_id: 9101
+    description: >-
+      Search places inside the area (restaurants, cafes, shops, attractions) by a text
+      query, with optional rating, price and open-now filters.
+  - source_id: 9102
+    description: >-
+      Details of one place from a places search result, by its item id (e.g. i3):
+      phone, website, opening hours and a short description.

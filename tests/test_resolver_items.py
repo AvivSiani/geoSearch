@@ -54,7 +54,8 @@ class NameRow(BaseModel):
 
 
 def _place(ref: str, where: tuple[float, float], **extra: Any) -> dict[str, Any]:
-    return {"id": ref, "name": f"n-{ref[-1]}", "lon": where[0], "lat": where[1], "phone": None} | extra
+    row = {"id": ref, "name": f"n-{ref[-1]}", "lon": where[0], "lat": where[1], "phone": None}
+    return row | extra
 
 
 SEEN: dict[str, Any] = {}

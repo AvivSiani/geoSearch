@@ -7,7 +7,7 @@ written here and reviewable in one place.
 
 import importlib
 
-MODULES: tuple[str, ...] = ("geosearch.sources.demo",)
+MODULES: tuple[str, ...] = ("geosearch.sources.demo", "geosearch.sources.places")
 
 
 def load_all() -> None:
