@@ -133,6 +133,24 @@ def test_follow_up_survives_area_store_eviction() -> None:
     assert shapely.from_wkt(HANDOFF_POLYGON).equals(runner.store.get(area_id))
 
 
+def test_follow_up_after_eviction_keeps_a_seven_decimal_area() -> None:
+    # 7th-decimal coordinates: a 6-decimal WKT round-trip would hash to another
+    # area_id (Stage 6 §1.2). Full-precision WKT restores the exact same area.
+    precise = (
+        "POLYGON((34.7500004 32.0500007, 34.8000003 32.05, 34.8 32.1000006, "
+        "34.75 32.1, 34.7500004 32.0500007))"
+    )
+    runner = _runner(responses=[ai("a1"), ai("a2")])
+    first = runner.handle(UserRequest(wkt=precise, prompt="q1"))
+    area_id = first.state["conversation"]["area_id"]
+    original = runner.store.get(area_id)
+    runner.store._areas.clear()
+
+    second = runner.handle(UserRequest(prompt="q2", conversation_id=first.conversation_id))
+    assert second.state["conversation"]["area_id"] == area_id
+    assert shapely.equals_exact(runner.store.get(area_id), original, tolerance=0)
+
+
 def test_unknown_conversation_is_not_found() -> None:
     runner = _runner()
     with pytest.raises(GeoValidationError) as exc:

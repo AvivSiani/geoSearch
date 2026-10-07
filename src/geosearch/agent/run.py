@@ -28,7 +28,7 @@ from geosearch.agent.holder import AgentHolder
 from geosearch.agent.ledger import TokenLedger
 from geosearch.config import GeoConfig
 from geosearch.errors import ErrorCode, GeoValidationError
-from geosearch.geo.area_store import AreaStore
+from geosearch.geo.area_store import AreaNotFound, AreaStore, area_to_wkt
 from geosearch.geo.buffer import BufferStrategy
 from geosearch.geo.ops import AreaOps
 from geosearch.request.checks import check_prompt_length, check_prompt_present
@@ -183,9 +183,23 @@ class RequestRunner:
             return self._new_conversation(agent, req)
         return self._follow_up(agent, req)
 
+    def _restore_area(self, area_id: str, area_wkt: str) -> None:
+        """Make sure the conversation's area is in the store. A persistent store
+        reads it back; an in-memory one may have evicted it, so it is re-put from
+        the state's full-precision WKT, which hashes to the same area_id. A
+        different id would mean the area changed, which must never pass silently."""
+        try:
+            self.store.get(area_id)
+            return
+        except AreaNotFound:
+            pass
+        restored = self.store.put(shapely.from_wkt(area_wkt))
+        if restored != area_id:
+            raise AreaNotFound(f"{area_id} restored as {restored}")
+
     def _new_conversation(self, agent: CompiledStateGraph, req: UserRequest) -> TurnOutcome:
         validated = validate_request(req, self.cfg, self.store, self.ops, self.buffer_strategy)
-        area_wkt = shapely.to_wkt(self.store.get(validated.area_id))
+        area_wkt = area_to_wkt(self.store.get(validated.area_id))
         conversation_id = self.registry.create(validated.area_id)
 
         with self.registry.turn(conversation_id) as (_entry, turn):
@@ -242,9 +256,7 @@ class RequestRunner:
                         {"expected_area_id": area_id, "got_area_id": probe.area_id},
                     )
 
-            # Re-put the stored area in case the LRU evicted it; the content hash
-            # yields the same area_id.
-            self.store.put(shapely.from_wkt(area_wkt))
+            self._restore_area(area_id, area_wkt)
 
             state = build_new_turn_state(
                 conversation_id=conversation_id,

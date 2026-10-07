@@ -25,7 +25,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import shapely
 import yaml
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
@@ -39,7 +38,7 @@ from geosearch.agent.ledger import LedgerRecord, TokenLedger
 from geosearch.agent.model import build_chat_model
 from geosearch.agent.run import build_new_turn_state, invoke_turn
 from geosearch.config import GeoConfig
-from geosearch.geo.area_store import InMemoryAreaStore
+from geosearch.geo.area_store import InMemoryAreaStore, area_to_wkt
 from geosearch.geo.buffer import STRATEGIES
 from geosearch.geo.ops import AreaOps
 from geosearch.registry.catalog import CatalogCache, CatalogSnapshot
@@ -164,7 +163,7 @@ def _run_case(
                 UserRequest(wkt=wkt, prompt=turn["prompt"]), cfg, store, ops, buffer_strategy
             )
             area_id = validated.area_id
-            area_wkt = shapely.to_wkt(store.get(area_id))
+            area_wkt = area_to_wkt(store.get(area_id))
             area_summary = validated.area_summary
         state = build_new_turn_state(
             conversation_id=conversation_id,

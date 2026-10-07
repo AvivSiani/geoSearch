@@ -28,6 +28,14 @@ def make_area_id(area: Area) -> str:
     return f"area_{digest[:12]}"
 
 
+def area_to_wkt(area: Area) -> str:
+    """Full-precision WKT, so reading it back yields the same shape and the same
+    area_id. shapely's default rounds to 6 decimals while make_area_id hashes at
+    7, so a default-rounded round-trip could silently change the area
+    (invariant 1)."""
+    return shapely.to_wkt(area, rounding_precision=-1)
+
+
 class AreaNotFound(Exception):
     """Internal error, not a client error: clients never send an area_id, so a
     missing area_id signals a bug in our own code, not bad input."""
