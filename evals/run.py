@@ -383,7 +383,7 @@ def _run_suite(suite: dict, runs: int, harness: str, store: str, restart: bool) 
         "store": store,
         "restart": restart,
         "runs": runs,
-        "model": cfg.llm.model,
+        "model": model.model_name,
         "provider": cfg.llm.provider,
         "effective_input_budget": cfg.budget.effective_input_budget,
         "disclosure": disclosure,

@@ -32,10 +32,11 @@ Responsibility split, which guides every design choice:
 9. **One conversation, one area.** A follow-up cannot change the area; a re-sent
    WKT that resolves to a different `area_id` is `AREA_MISMATCH`.
 10. **All model and budget numbers live in config.** Changing model, provider or
-    window is a config change (`GEOSEARCH_LLM__*`, `GEOSEARCH_BUDGET__*`), never
-    a code change.
-11. **`agent/model.py` is the only module that imports a provider class.**
-    Everything else receives a `BaseChatModel`.
+    window is a config change, never a code change: the server and model name are
+    agentkit's `AGENTKIT_MODEL_*`; the rest is `GEOSEARCH_LLM__*`,
+    `GEOSEARCH_BUDGET__*`.
+11. **`agent/model.py` is the only module that builds a chat model** (with
+    agentkit's `get_model`). Everything else receives a `BaseChatModel`.
 12. **Tests never need a GPU or a running model** — except `scripts/smoke_model.py`
     and the eval harness. Everything in `pytest` uses `tests/scripted_model.py`.
 
@@ -131,13 +132,23 @@ Detailed spec: `docs/specs/stage-6-conversation-persistence.md`.
 
 ## Verified library APIs (Stage 2, pinned versions)
 
-Pinned: `deepagents==0.7.21`, `langchain==1.4.3`, `langgraph==1.2.12`,
-`langchain-ollama==1.1.0`, `langchain-openai==1.6.7`. Facts confirmed against
-these; re-verify on upgrade:
+The stack comes from the team toolkit **`agentkit-619==0.5.0`** (path source
+`../../agentkit_619-main/agentkit_619`), which pins `deepagents==0.7.11`,
+`langchain==1.3.18`, `langchain-core==1.6.5`, `langchain-openai==1.4.1`,
+`langgraph==1.2.12`. We import those libraries directly but never list them in
+`pyproject.toml` (agentkit's rule: another version fails to install). The agent
+is built with `create_kit_agent` (= `create_deep_agent` + Opik tracing when
+`OPIK_URL_OVERRIDE`/`OPIK_API_KEY` is set) and always gets `backend=StateBackend()`,
+else agentkit mounts a `skills/` folder found via `aegra.json`. Facts confirmed
+against these; re-verify on upgrade:
 
-- **ChatOllama** thinking mode is the `reasoning` param (not `thinking`/`think`);
-  it fills `usage_metadata`. `num_ctx` carries our window (confirmed via `/api/ps`
-  `context_length`).
+- **Model**: agentkit's `get_model` returns a `ChatOpenAI` (chat completions)
+  from `AGENTKIT_MODEL_URL`/`_NAME`/`_TOKEN` and raises if URL or name is unset;
+  it fills `usage_metadata`. Ollama (temporary dev server) is reached through
+  `/v1`, which **ignores `num_ctx`** (gemma4 loads at 4096): the window is set
+  server-side (a `PARAMETER num_ctx` model tag or `OLLAMA_CONTEXT_LENGTH`).
+  Ollama's `/v1` thinks by default (and can spend all of `max_tokens` on it):
+  `extra_body={"reasoning_effort": "none"}` turns it off; `keep_alive` is honored.
 - **ToolRuntime** imports from `langchain.tools` as `ToolRuntime[Context, State]`;
   a `runtime`-only tool exposes an empty `properties` schema.
 - **Middleware**: append to the system prompt with
@@ -147,9 +158,10 @@ these; re-verify on upgrade:
   middleware is `ModelCallLimitMiddleware(run_limit=..., exit_behavior="end")`; on
   the cap it appends an AIMessage starting `"Model call limits exceeded"` — the
   only signal of a call-limit stop (`run_model_call_count` is not surfaced).
-- **deepagents default tools**: `ls, read_file, write_file, edit_file, glob, grep,
-  delete, task`. There is **no `write_todos`** and **no `execute`** (execute needs
-  a sandbox backend). Harness trimming via `HarnessProfile.excluded_tools` is keyed
+- **deepagents default tools** (0.7.11): `ls, read_file, write_file, edit_file,
+  glob, grep, delete, execute, task`. There is **no `write_todos`**; `execute` is
+  offered even without a sandbox backend (it returns an error), and the trimmed
+  harness drops it. Harness trimming via `HarnessProfile.excluded_tools` is keyed
   by `provider:model`, so to stay model-agnostic we use a `FilesystemMiddleware`
   allowlist plus our own `ToolAllowlistMiddleware`.
 - **StateBackend files** live under the `"files"` state key as a path→`FileData`
@@ -225,7 +237,7 @@ Confirmed against the Stage 2 pins:
 
 Confirmed against the Stage 2-3 pins (`langgraph-checkpoint==4.2.0`):
 
-- **DeltaChannels**: deepagents 0.7.21 declares `messages` and `files` as
+- **DeltaChannels**: deepagents 0.7.11 (as 0.7.21) declares `messages` and `files` as
   `DeltaChannel(..., snapshot_frequency=50)`. A checkpoint's `channel_values`
   holds only a marker for them (a `_DeltaSnapshot` every 50 updates); values are
   rebuilt by `get_delta_channel_history`, walking `parent_config` and each

@@ -77,6 +77,35 @@ uv run geosearch-registry delete <source_id>   # an integer id
 Exit codes: 0 ok, 1 validation problems, 2 usage or connection error. See
 "How to add a tool" in `CLAUDE.md`.
 
+## Model
+
+The agent is built with the team toolkit `agentkit-619` (a thin layer over
+`deepagents`, installed from `../../agentkit_619-main/agentkit_619`; it pins
+`deepagents`, `langchain`, `langgraph` and `langchain-openai`, so this project
+doesn't). Its `get_model` reads the server from `AGENTKIT_MODEL_*` variables;
+copy `.env.example` to `.env` (agentkit loads it from the current folder):
+
+| Env var | Meaning |
+| --- | --- |
+| `AGENTKIT_MODEL_URL` | OpenAI-compatible base URL (Ollama: `http://localhost:11434/v1`) |
+| `AGENTKIT_MODEL_NAME` | model name on that server (e.g. `gemma4:12b`) |
+| `AGENTKIT_MODEL_TOKEN` | API token (default `EMPTY`) |
+| `AGENTKIT_MODEL_VERIFY_SSL`, `_TIMEOUT`, `_MAX_RETRIES` | TLS check, seconds per call (600), retries (2) |
+| `OPIK_URL_OVERRIDE` or `OPIK_API_KEY` | when set, every agent run is traced in Opik |
+
+`GEOSEARCH_LLM__PROVIDER` names the kind of server: `ollama` (the temporary
+dev server: sends `reasoning_effort: "none"` unless `GEOSEARCH_LLM__THINKING`,
+and `keep_alive`) or `openai_compatible`.
+
+Ollama's `/v1` ignores `num_ctx`, so set the window on the server to
+`budget.context_window` (16384), e.g. with a model tag (no weights are copied):
+
+```bash
+printf 'FROM gemma4:12b\nPARAMETER num_ctx 16384\n' > Modelfile
+ollama create gemma4:12b-16k -f Modelfile     # then AGENTKIT_MODEL_NAME=gemma4:12b-16k
+uv run python scripts/smoke_model.py          # checks the loaded window
+```
+
 ## Configure
 
 Configuration is validated at startup via `pydantic-settings` and fails fast

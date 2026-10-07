@@ -113,7 +113,7 @@ Gate: valid request + `area_id`, all tests green.
 
 `POST /v1/requests` now runs a Deep Agent on a configurable small model. The dev default is `gemma4:12b` on local Ollama. It covers:
 
-- **Model:** a provider factory (`ollama` / `openai_compatible`), so changing model or server is config only.
+- **Model:** a provider factory (`ollama` / `openai_compatible`), so changing model or server is config only. Since the switch to `agentkit-619`, the model is agentkit's `get_model` (server and name from `AGENTKIT_MODEL_*`; Ollama through its `/v1`) and the agent is built with `create_kit_agent`.
 - **Context budget:** every number is in config. Defaults are a 16K window and a 13,312-token input budget per call.
 - **State:** a custom schema with `conversation`, `request`, `intent`, `loaded_capabilities` and `search`.
 - **Conversations:** multi-turn via an optional `conversation_id`. Each conversation is bound to one area, and its state is checkpointed (in memory here; MongoDB in Stage 6).

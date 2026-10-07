@@ -3,7 +3,9 @@
 import ast
 from pathlib import Path
 
-FORBIDDEN_PREFIXES = ("fastapi", "starlette", "uvicorn", "langchain", "deepagents", "openai")
+FORBIDDEN_PREFIXES = (
+    "fastapi", "starlette", "uvicorn", "langchain", "deepagents", "agentkit_619", "openai",
+)  # fmt: skip
 SRC = Path(__file__).parent.parent / "src" / "geosearch"
 
 

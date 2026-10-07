@@ -7,7 +7,7 @@ after any summarization has run.
 
 Estimates use `count_tokens_approximately` (char-based, model-agnostic). Reported
 numbers come from the response's `usage_metadata` when the provider fills it
-(ChatOllama does). The two are kept separate on purpose: the gap between them is
+(ChatOpenAI does). The two are kept separate on purpose: the gap between them is
 itself a signal (truncation, prompt caching).
 """
 

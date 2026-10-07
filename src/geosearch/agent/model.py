@@ -1,54 +1,49 @@
 """The only module that knows about model providers (Stage 2 invariant 5).
 
 Everything else in the agent receives a ready-made `BaseChatModel`, so switching
-provider, model or context window is a config change and nothing imports a
+provider, model or context window is a config change and nothing builds a
 specific provider class but this file.
+
+The model comes from agentkit_619's `get_model`: a ChatOpenAI for the team's
+OpenAI-compatible server, configured by its AGENTKIT_MODEL_* variables. Ollama
+is a temporary dev server reached through its OpenAI-compatible /v1 endpoint.
 """
 
+from typing import Any
+
+from agentkit_619 import get_model
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from geosearch.config import ContextBudgetConfig, LLMConfig
 
 
 def build_chat_model(llm: LLMConfig, budget: ContextBudgetConfig) -> BaseChatModel:
-    """Construct the chat model named by config.
+    """Construct the chat model named by config (fails fast if AGENTKIT_MODEL_URL
+    or AGENTKIT_MODEL_NAME is unset).
 
-    Why ChatOllama rather than ChatOpenAI against Ollama's /v1 endpoint: the
-    OpenAI-compatible API can't set the context size per request, and Ollama
-    silently defaults Gemma 4 to a ~4K window. ChatOllama lets us pass num_ctx
-    from our budget config so the configured window is actually in effect.
+    Ollama caveat: /v1 ignores `num_ctx`, so the window cannot be set per
+    request; Ollama loads the model at its own default (4096 for gemma4 on
+    0.35.1). Give it `budget.context_window` on the server side: a model tag
+    built with `PARAMETER num_ctx`, or OLLAMA_CONTEXT_LENGTH. The smoke script
+    checks it.
     """
-    if llm.provider == "ollama":
-        # `reasoning` is ChatOllama's name for Gemma 4's thinking mode (verified
-        # against langchain-ollama 1.1.0; there is no `thinking`/`think` field).
-        from langchain_ollama import ChatOllama
+    if llm.provider not in ("ollama", "openai_compatible"):
+        raise ValueError(f"unknown llm.provider: {llm.provider!r}")  # unreachable via config
+    return get_model(
+        max_tokens=budget.max_output_tokens,
+        temperature=llm.temperature,
+        extra_body=_extra_body(llm),
+    )
 
-        return ChatOllama(
-            model=llm.model,
-            base_url=llm.base_url,
-            num_ctx=budget.context_window,
-            num_predict=budget.max_output_tokens,
-            temperature=llm.temperature,
-            keep_alive=llm.keep_alive,
-            reasoning=llm.thinking,
-            client_kwargs={"timeout": llm.timeout_s},
-        )
 
-    if llm.provider == "openai_compatible":
-        # use_responses_api=False: most self-hosted servers (vLLM, Ollama /v1)
-        # speak plain chat completions, not OpenAI's Responses API. We always
-        # pass a model instance, never a "provider:model" string, so Deep Agents
-        # never routes this to the Responses API itself.
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(
-            model=llm.model,
-            base_url=llm.base_url,
-            api_key=llm.api_key.get_secret_value(),
-            max_tokens=budget.max_output_tokens,
-            temperature=llm.temperature,
-            timeout=llm.timeout_s,
-            use_responses_api=False,
-        )
-
-    raise ValueError(f"unknown llm.provider: {llm.provider!r}")  # unreachable via config
+def _extra_body(llm: LLMConfig) -> dict[str, Any] | None:
+    """Server-specific request fields. Ollama's /v1 thinks by default (and can
+    spend all of `max_tokens` on it, leaving empty content) unless sent
+    `reasoning_effort: "none"`; it also takes `keep_alive` (both verified on
+    Ollama 0.35.1)."""
+    if llm.provider != "ollama":
+        return None
+    body: dict[str, Any] = {"keep_alive": llm.keep_alive}
+    if not llm.thinking:
+        body["reasoning_effort"] = "none"
+    return body

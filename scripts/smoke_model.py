@@ -1,13 +1,16 @@
 """Live smoke test for the configured model. NOT run by pytest — it needs a
-real Ollama server and a pulled model. Run it by hand:
+real model server (AGENTKIT_MODEL_URL / AGENTKIT_MODEL_NAME, e.g. in .env).
+Run it by hand:
 
     uv run python scripts/smoke_model.py
 
 It checks the five things Stage 2 §15 step 1 requires:
-  1. Ollama >= 0.20.2 (carries the Gemma 4 tool-call fix).
+  1. Ollama >= 0.20.2 (carries the Gemma 4 tool-call fix). Ollama only.
   2. A plain chat call returns text.
   3. A tool call is actually emitted when a tool is bound.
-  4. The configured num_ctx is in effect (via /api/ps `context_length`).
+  4. The configured window is in effect (via /api/ps `context_length`). Ollama
+     only: its /v1 endpoint ignores num_ctx, so the window must be set on the
+     server (a model tag with `PARAMETER num_ctx`, or OLLAMA_CONTEXT_LENGTH).
   5. The prompt-cache caveat: whether reported prompt tokens drop on a repeat
      call, which would make the ledger's truncation flag fire falsely.
 
@@ -53,9 +56,11 @@ def check_ps_context(base_url: str, expected_ctx: int) -> bool:
 def main() -> int:
     cfg = GeoConfig()
     model = build_chat_model(cfg.llm, cfg.budget)
-    base_url = cfg.llm.base_url.rstrip("/")
+    is_ollama = cfg.llm.provider == "ollama"
+    # Ollama's own API (/api/...) sits next to its OpenAI-compatible /v1.
+    base_url = model.openai_api_base.rstrip("/").removesuffix("/v1")
 
-    ok = check_version(base_url)
+    ok = check_version(base_url) if is_ollama else True
 
     plain = model.invoke("Reply with exactly the word: ready")
     plain_ok = bool(plain.content.strip())
@@ -73,7 +78,7 @@ def main() -> int:
     print(f"[{'ok' if tool_ok else 'FAIL'}] tool call -> {tool_resp.tool_calls}")
 
     # num_ctx is only observable after the model is loaded, i.e. after a call.
-    ctx_ok = check_ps_context(base_url, cfg.budget.context_window)
+    ctx_ok = check_ps_context(base_url, cfg.budget.context_window) if is_ollama else True
 
     # Prompt-cache caveat: same prompt twice, compare reported input tokens.
     r1 = model.invoke("Count to three.")

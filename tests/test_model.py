@@ -1,52 +1,51 @@
-"""The model factory must build either provider from config alone, offline.
+"""The model factory must build the model from config alone, offline.
 
 These construct the chat-model objects but never call them, so no server or GPU
-is needed (Stage 2 invariant 6).
+is needed (Stage 2 invariant 6). The server and model name are agentkit_619's
+AGENTKIT_MODEL_* variables, set here per test.
 """
 
 import pytest
-from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 
 from geosearch.agent.model import build_chat_model
 from geosearch.config import ContextBudgetConfig, LLMConfig
 
 
-def test_builds_ollama_with_window_from_budget() -> None:
-    budget = ContextBudgetConfig(context_window=16_384, max_output_tokens=1_024)
-    model = build_chat_model(LLMConfig(provider="ollama", model="gemma4:12b"), budget)
-    assert isinstance(model, ChatOllama)
-    # The whole point of ChatOllama: num_ctx actually carries our window.
-    assert model.num_ctx == 16_384
-    assert model.num_predict == 1_024
-    assert model.reasoning is False
+@pytest.fixture(autouse=True)
+def agentkit_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTKIT_MODEL_URL", "http://host:8000/v1")
+    monkeypatch.setenv("AGENTKIT_MODEL_NAME", "gemma4:12b")
+    monkeypatch.setenv("AGENTKIT_MODEL_VERIFY_SSL", "true")
 
 
-def test_ollama_thinking_maps_to_reasoning() -> None:
-    model = build_chat_model(LLMConfig(provider="ollama", thinking=True), ContextBudgetConfig())
-    assert isinstance(model, ChatOllama)
-    assert model.reasoning is True
-
-
-def test_builds_openai_compatible_plain_chat() -> None:
+def test_builds_plain_chat_from_agentkit_env() -> None:
     budget = ContextBudgetConfig(max_output_tokens=512)
-    model = build_chat_model(
-        LLMConfig(provider="openai_compatible", model="x", base_url="http://host:8000/v1"),
-        budget,
-    )
+    model = build_chat_model(LLMConfig(provider="openai_compatible"), budget)
     assert isinstance(model, ChatOpenAI)
+    assert model.model_name == "gemma4:12b"
     assert model.openai_api_base == "http://host:8000/v1"
     assert model.max_tokens == 512
     # Self-hosted servers speak chat completions, not the Responses API.
     assert model.use_responses_api is False
+    assert not model.extra_body
 
 
-def test_switching_provider_is_config_only() -> None:
-    # Same factory call, only config differs -> different model class.
-    budget = ContextBudgetConfig()
-    a = build_chat_model(LLMConfig(provider="ollama"), budget)
-    b = build_chat_model(LLMConfig(provider="openai_compatible"), budget)
-    assert type(a) is not type(b)
+def test_ollama_turns_thinking_off_and_keeps_alive() -> None:
+    model = build_chat_model(LLMConfig(provider="ollama", keep_alive="5m"), ContextBudgetConfig())
+    # Without reasoning_effort "none", Ollama's /v1 thinks by default.
+    assert model.extra_body == {"keep_alive": "5m", "reasoning_effort": "none"}
+
+
+def test_ollama_thinking_leaves_reasoning_on() -> None:
+    model = build_chat_model(LLMConfig(provider="ollama", thinking=True), ContextBudgetConfig())
+    assert "reasoning_effort" not in model.extra_body
+
+
+def test_missing_agentkit_env_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTKIT_MODEL_URL")
+    with pytest.raises(RuntimeError, match="AGENTKIT_MODEL_URL"):
+        build_chat_model(LLMConfig(), ContextBudgetConfig())
 
 
 def test_unknown_provider_raises() -> None:

@@ -65,18 +65,19 @@ class AreaStoreConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    """Which model to talk to and how. Changing provider, model or server is a
-    config change, never a code change (Stage 2 invariant 4). Only agent/model.py
-    reads this (invariant 5)."""
+    """How to talk to the model. Changing provider, model or server is a config
+    change, never a code change (Stage 2 invariant 4). Only agent/model.py reads
+    this (invariant 5).
 
-    provider: Literal["ollama", "openai_compatible"] = "ollama"
-    model: str = "gemma4:12b"
-    base_url: str = "http://localhost:11434"  # vLLM example: http://host:8000/v1
-    api_key: SecretStr = SecretStr("EMPTY")  # openai_compatible only
+    Which server and model is agentkit_619's config, not ours: AGENTKIT_MODEL_URL,
+    AGENTKIT_MODEL_NAME, AGENTKIT_MODEL_TOKEN (plus _VERIFY_SSL, _TIMEOUT,
+    _MAX_RETRIES), read by its `get_model`. `provider` only names the kind of
+    OpenAI-compatible server, for the few request fields that differ."""
+
+    provider: Literal["ollama", "openai_compatible"] = "ollama"  # ollama: temporary dev server
     temperature: float = 0.0
-    thinking: bool = False  # Gemma 4 thinking mode (ChatOllama `reasoning`)
+    thinking: bool = False  # Gemma 4 thinking mode (ollama: `reasoning_effort`)
     keep_alive: str = "10m"  # ollama only
-    timeout_s: float = 120.0
 
 
 class ContextBudgetConfig(BaseModel):

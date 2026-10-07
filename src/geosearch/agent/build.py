@@ -19,23 +19,32 @@ call limit -> allowlist -> ledger (last). The summarizer sits inside disclosure
 on tool calls, so a blocked (unloaded) call never reaches it, and it rewrites a
 registry result's rows into a cited summary before the message enters state.
 
-Middleware ordering note for deepagents 0.7.21: user middleware whose `.name`
+The agent is built by agentkit_619's `create_kit_agent` (`create_deep_agent` plus
+Opik tracing when OPIK_URL_OVERRIDE or OPIK_API_KEY is set). We pass our own
+`backend`: without one it would mount the project's `skills/` folder, found
+through `aegra.json`, which this app has no use for. `StateBackend()` is what
+`create_deep_agent` uses by default, so files stay in agent state as before.
+
+Middleware ordering note for deepagents 0.7.11: user middleware whose `.name`
 matches a base-stack middleware *replaces it in place* (so our FilesystemMiddleware
 and SummarizationMiddleware override the defaults); brand-new middleware are
 appended after the base core, before the tail. The token ledger is listed last
 so it is innermost and measures the request exactly as the model receives it —
 after the area line is appended and the tool set is trimmed.
 
-Trimming mechanism (verified against 0.7.21): deepagents' own trimming levers
+Trimming mechanism (verified against 0.7.11): deepagents' own trimming levers
 (`HarnessProfile.excluded_tools`, disabling the general-purpose subagent) are
 keyed by `provider:model`, which would couple the code to a specific model. To
 keep the harness model-agnostic we instead use a FilesystemMiddleware allowlist
 for the file tools and our own ToolAllowlistMiddleware to drop everything else
-(notably `task`). Note that deepagents 0.7.21 has no `write_todos` tool and no
-`execute` tool without a sandbox backend, so neither appears here.
+(notably `task` and `execute`). Note that deepagents 0.7.11 has no `write_todos`
+tool; it does offer `execute` even without a sandbox backend (the call returns
+an error), so the "default" harness shows it.
 """
 
-from deepagents import FilesystemMiddleware, create_deep_agent
+from agentkit_619 import create_kit_agent
+from deepagents import FilesystemMiddleware
+from deepagents.backends import StateBackend
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
@@ -92,7 +101,7 @@ def build_agent(
     if cfg.agent.harness == "trimmed":
         # Summarize at a fraction of the input budget. Replaces the default
         # SummarizationMiddleware (matched by name), which can't know our window
-        # because ChatOllama has no model profile.
+        # because a self-hosted model has no model profile.
         trigger_tokens = int(cfg.budget.summarize_at_fraction * cfg.budget.effective_input_budget)
         middleware += [
             FilesystemMiddleware(tools=_TRIMMED_FILE_TOOLS),
@@ -116,7 +125,7 @@ def build_agent(
     # Last, so it is innermost and measures the final request.
     middleware.append(TokenLedgerMiddleware())
 
-    return create_deep_agent(
+    return create_kit_agent(
         model=model,
         tools=[
             geo_describe_area,
@@ -129,4 +138,5 @@ def build_agent(
         state_schema=GeoAgentState,
         context_schema=AgentContext,
         checkpointer=checkpointer,
+        backend=StateBackend(),  # no project skills/ (see module docstring)
     )

@@ -30,20 +30,13 @@ def test_defaults(cfg: GeoConfig) -> None:
 
 def test_stage2_defaults(cfg: GeoConfig) -> None:
     assert cfg.llm.provider == "ollama"
-    assert cfg.llm.model == "gemma4:12b"
-    assert cfg.llm.base_url == "http://localhost:11434"
+    assert cfg.llm.thinking is False
     assert cfg.budget.context_window == 16_384
     assert cfg.budget.effective_input_budget == 13_312
     assert cfg.conversation.store == "memory"
     assert cfg.conversation.max_turns == 20
     assert cfg.agent.harness == "trimmed"
     assert cfg.agent.max_model_calls_per_turn == 8
-
-
-def test_api_key_is_secret(cfg: GeoConfig) -> None:
-    # The key must not leak through repr/str; it reads back only explicitly.
-    assert "EMPTY" not in repr(cfg.llm.api_key)
-    assert cfg.llm.api_key.get_secret_value() == "EMPTY"
 
 
 def test_effective_input_budget_explicit_overrides_derived() -> None:
@@ -87,11 +80,11 @@ def test_max_model_calls_at_least_one() -> None:
 
 def test_llm_config_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GEOSEARCH_LLM__PROVIDER", "openai_compatible")
-    monkeypatch.setenv("GEOSEARCH_LLM__MODEL", "some-model")
+    monkeypatch.setenv("GEOSEARCH_LLM__TEMPERATURE", "0.5")
     cfg = GeoConfig(_env_file=None)
     assert isinstance(cfg.llm, LLMConfig)
     assert cfg.llm.provider == "openai_compatible"
-    assert cfg.llm.model == "some-model"
+    assert cfg.llm.temperature == 0.5
 
 
 def test_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
