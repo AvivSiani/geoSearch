@@ -28,6 +28,9 @@ class ErrorCode(StrEnum):
     CONVERSATION_BUSY = "CONVERSATION_BUSY"
     CONVERSATION_LIMIT = "CONVERSATION_LIMIT"
 
+    # Stage 6: the conversation store (MongoDB) is unreachable.
+    STORE_UNAVAILABLE = "STORE_UNAVAILABLE"
+
 
 class GeoValidationError(Exception):
     """The single exception type the core raises. api/ maps this to an ErrorEnvelope."""

@@ -1,10 +1,11 @@
 """POST /v1/requests — the agent runs behind the same endpoint as Stage 1, so
 clients that only need an answer never change. The route is a thin translation
 layer: it hands the request to the RequestRunner and maps model-connectivity
-failures to a typed 503."""
+failures (model server, MongoDB) to typed 503s."""
 
 import httpx
 from fastapi import APIRouter, Request
+from pymongo.errors import ConnectionFailure
 
 from geosearch.errors import ErrorCode, GeoValidationError
 from geosearch.request.models import AgentResponse, ErrorEnvelope, UserRequest
@@ -21,6 +22,18 @@ _MODEL_DOWN_ERRORS = (
     httpx.ReadTimeout,
     httpx.TimeoutException,
 )
+
+
+def _store_unavailable(exc: ConnectionFailure) -> GeoValidationError:
+    """MongoDB went away mid-request. pymongo's ConnectionFailure (which covers
+    server-selection and network timeouts) is not a builtin ConnectionError, so
+    it never lands in _MODEL_DOWN_ERRORS. Any other PyMongoError is a bug, not
+    an outage, and stays a 500. Never a fallback to memory."""
+    return GeoValidationError(
+        ErrorCode.STORE_UNAVAILABLE,
+        "the conversation store is unreachable",
+        {"error": type(exc).__name__},  # the message may echo the URI
+    )
 
 
 @router.post(
@@ -45,6 +58,8 @@ def create_request(request: UserRequest, http_request: Request) -> AgentResponse
             "the model server is unreachable",
             {"error": str(exc)},
         ) from exc
+    except ConnectionFailure as exc:
+        raise _store_unavailable(exc) from exc
 
     return AgentResponse(
         conversation_id=outcome.conversation_id,
@@ -57,3 +72,4 @@ def create_request(request: UserRequest, http_request: Request) -> AgentResponse
         items=outcome.items,
         answer_source=outcome.answer_source,
     )
+

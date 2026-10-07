@@ -15,17 +15,17 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.memory import InMemorySaver
 
 from geosearch.config import ConversationConfig, GeoConfig
 from geosearch.errors import ErrorCode, GeoValidationError
 
 
 def make_checkpointer(cfg: GeoConfig) -> BaseCheckpointSaver:
-    """Pick the checkpointer behind a config switch. MongoDB is Stage 3."""
-    if cfg.conversation.store == "memory":
-        return InMemorySaver()
-    raise NotImplementedError("Stage 3: mongodb conversation store")
+    """The checkpointer alone, for tests and tools that build an agent without
+    the app. The app uses agent/persistence.py, which picks every backend."""
+    from geosearch.agent.persistence import open_persistence
+
+    return open_persistence(cfg).checkpointer
 
 
 @dataclass

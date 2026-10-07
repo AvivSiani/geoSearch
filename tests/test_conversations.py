@@ -185,8 +185,8 @@ def test_idle_expiry_is_not_found() -> None:
     clock = FakeClock()
     runner = _runner(responses=[ai("a1"), ai("a2")], clock=clock)
     first = runner.handle(UserRequest(wkt=HANDOFF_POLYGON, prompt="q1"))
-    # Advance past the idle TTL (default 60 min).
-    clock.now += 61 * 60
+    # Advance just past the idle TTL.
+    clock.now += GeoConfig(_env_file=None).conversation.idle_ttl_minutes * 60 + 1
     with pytest.raises(GeoValidationError) as exc:
         runner.handle(UserRequest(prompt="q2", conversation_id=first.conversation_id))
     assert exc.value.code == ErrorCode.CONVERSATION_NOT_FOUND

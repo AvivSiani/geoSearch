@@ -13,6 +13,7 @@ _STATUS_BY_CODE: dict[ErrorCode, int] = {
     ErrorCode.CONVERSATION_NOT_FOUND: 404,
     ErrorCode.CONVERSATION_BUSY: 409,
     ErrorCode.MODEL_UNAVAILABLE: 503,
+    ErrorCode.STORE_UNAVAILABLE: 503,
 }
 
 

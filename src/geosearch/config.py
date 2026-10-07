@@ -119,12 +119,30 @@ class ContextBudgetConfig(BaseModel):
 
 
 class ConversationConfig(BaseModel):
-    """Multi-turn conversation bounds. Conversations stay in memory; a mongodb
-    store is not planned (Stage 3 uses MongoDB for the tool registry only)."""
+    """Multi-turn conversations and where they persist (Stage 6).
+
+    `memory` keeps everything in-process (unit tests, quick dev runs); `mongodb`
+    stores checkpoints, conversation records and areas in `mongo.database`, so a
+    conversation survives a restart. A conversation expires `idle_ttl_minutes`
+    after its last turn, on either backend."""
 
     store: Literal["memory", "mongodb"] = "memory"
     max_turns: int = 20
-    idle_ttl_minutes: int = 60
+    idle_ttl_minutes: int = 10_080  # 7 days
+    checkpoints_collection: str = "checkpoints"
+    checkpoint_writes_collection: str = "checkpoint_writes"
+    conversations_collection: str = "conversations"
+    areas_collection: str = "areas"
+    checkpoint_warn_bytes: int = 4_000_000  # warn-only; MongoDB's document limit is 16 MB
+
+    @property
+    def collection_names(self) -> tuple[str, ...]:
+        return (
+            self.checkpoints_collection,
+            self.checkpoint_writes_collection,
+            self.conversations_collection,
+            self.areas_collection,
+        )
 
     @model_validator(mode="after")
     def _check_bounds(self) -> "ConversationConfig":
@@ -134,6 +152,18 @@ class ConversationConfig(BaseModel):
             raise ValueError(
                 f"conversation.idle_ttl_minutes must be > 0, got {self.idle_ttl_minutes}"
             )
+        if self.checkpoint_warn_bytes <= 0:
+            raise ValueError(
+                "conversation.checkpoint_warn_bytes must be > 0, got "
+                f"{self.checkpoint_warn_bytes}"
+            )
+        names = self.collection_names
+        if not all(names) or len(set(names)) != len(names):
+            raise ValueError(
+                f"conversation collection names must be non-empty and distinct, got {names}"
+            )
+        if set(names) & {"tools", "registry_meta"}:
+            raise ValueError("conversation collection names must not reuse the registry's")
         return self
 
 
@@ -155,7 +185,8 @@ class AgentConfig(BaseModel):
 
 
 class MongoConfig(BaseModel):
-    """Where the tool registry lives (Stage 3). Conversations stay in memory."""
+    """The MongoDB server and database: the tool registry (Stage 3) and, with
+    `conversation.store=mongodb`, conversations and areas (Stage 6)."""
 
     uri: str = "mongodb://localhost:27017"
     database: str = "geosearch"
