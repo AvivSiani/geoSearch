@@ -14,7 +14,7 @@ code is built to.
 
 ```bash
 uv sync
-docker compose up -d                                  # MongoDB for the tool registry
+docker compose up -d                                  # MongoDB: tool registry, conversations
 uv run geosearch-registry seed --include-demo         # optional: the demo tool
 uv run uvicorn geosearch.api.main:app --reload
 ```
@@ -43,6 +43,24 @@ Every response carries `items` — grounded places, each inside the area, built
 from tool data (`id`, `source_id`, `name`, `lon`, `lat`, `data`) — and
 `answer_source` (`submitted` when the agent finished with `submit_answer`,
 `fallback` otherwise). Detailed design: `docs/specs/stage-5-places.md`.
+
+## Conversations (Stage 6)
+
+A response's `conversation_id` continues the conversation: send it with the next
+`prompt` and no `wkt` (the area is bound for the whole conversation). Where
+conversations live is `GEOSEARCH_CONVERSATION__STORE`:
+
+- `memory` (default): in-process, for tests and quick dev runs.
+- `mongodb`: checkpoints, turn records and areas in `mongo.database`, so a
+  conversation survives an API restart. MongoDB must be up at startup; the app
+  never falls back to memory.
+
+A conversation expires `conversation.idle_ttl_minutes` (7 days) after its last
+turn. Its recorded turns are at `GET /v1/conversations/{conversation_id}` (404
+when unknown or expired; 503 `STORE_UNAVAILABLE` when MongoDB is down).
+`user_id` there is always `null`: a placeholder for future per-user ownership.
+From the terminal, `scripts/ask.py` runs a turn and `--conversation-id`
+resumes one. Detailed design: `docs/specs/stage-6-conversation-persistence.md`.
 
 ## Tool registry
 
@@ -79,6 +97,15 @@ as the nested delimiter.
 | `limits.max_area_km2` | `GEOSEARCH_LIMITS__MAX_AREA_KM2` | `100.0` |
 | `limits.max_prompt_chars` | `GEOSEARCH_LIMITS__MAX_PROMPT_CHARS` | `2000` |
 | `area_store.max_entries` | `GEOSEARCH_AREA_STORE__MAX_ENTRIES` | `10000` |
+| `conversation.store` | `GEOSEARCH_CONVERSATION__STORE` | `memory` (or `mongodb`) |
+| `conversation.max_turns` | `GEOSEARCH_CONVERSATION__MAX_TURNS` | `20` |
+| `conversation.idle_ttl_minutes` | `GEOSEARCH_CONVERSATION__IDLE_TTL_MINUTES` | `10080` (7 days) |
+| `conversation.checkpoint_durability` | `GEOSEARCH_CONVERSATION__CHECKPOINT_DURABILITY` | `exit` (or `sync`) |
+| `conversation.checkpoint_warn_bytes` | `GEOSEARCH_CONVERSATION__CHECKPOINT_WARN_BYTES` | `4000000` |
+| `conversation.checkpoints_collection` | `GEOSEARCH_CONVERSATION__CHECKPOINTS_COLLECTION` | `checkpoints` |
+| `conversation.checkpoint_writes_collection` | `GEOSEARCH_CONVERSATION__CHECKPOINT_WRITES_COLLECTION` | `checkpoint_writes` |
+| `conversation.conversations_collection` | `GEOSEARCH_CONVERSATION__CONVERSATIONS_COLLECTION` | `conversations` |
+| `conversation.areas_collection` | `GEOSEARCH_CONVERSATION__AREAS_COLLECTION` | `areas` |
 | `mongo.uri` | `GEOSEARCH_MONGO__URI` | `mongodb://localhost:27017` |
 | `mongo.database` | `GEOSEARCH_MONGO__DATABASE` | `geosearch` |
 | `mongo.server_selection_timeout_ms` | `GEOSEARCH_MONGO__SERVER_SELECTION_TIMEOUT_MS` | `2000` |

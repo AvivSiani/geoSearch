@@ -98,6 +98,37 @@ Detailed spec: `docs/specs/stage-5-places.md`.
 27. **Language is decided by code** (`detect_language`: any Hebrew letter →
     `he`), per turn, never by the model.
 
+### Stage 6 invariants (conversation persistence)
+
+Detailed spec: `docs/specs/stage-6-conversation-persistence.md`.
+
+28. **Persistence is config.** `conversation.store` (`memory` | `mongodb`) is read
+    only by `agent/persistence.py: open_persistence`. With `mongodb`, MongoDB must
+    answer at startup (`PersistenceUnavailable`); an outage mid-request is 503
+    `STORE_UNAVAILABLE`. Never a silent fallback to memory.
+29. **The checkpoint chain is never pruned.** deepagents' `messages` and `files`
+    are DeltaChannels, rebuilt from the parent chain; dropping ancestors rebuilds
+    them empty. `keep_alive` refreshes `expires_at` on the whole thread every turn,
+    so the chain expires whole. Turns run with `conversation.checkpoint_durability`
+    (`exit` by default, or `sync`), never LangGraph's default `async`.
+30. **The record follows the checkpoint.** A turn is recorded only after it
+    finished; a failed turn records nothing and doesn't count. A finished turn
+    whose record write was lost is backfilled from its checkpoint
+    (`recovered: true`). A record without state is a 404 and is deleted.
+31. **`user_id` is a placeholder.** Every conversation document has
+    `user_id: null`; no endpoint accepts it, no code branches on it, no index.
+32. **Areas persist exactly.** Stored as WKB of the normalized shape; the state's
+    `area_wkt` is full precision (`area_to_wkt`, never shapely's 6-decimal
+    default). A restored area that hashes to another `area_id` is an error.
+33. **Expiry is checked in code.** Every TTL index is `expires_at` with
+    `expireAfterSeconds=0`; reads treat `expires_at <= now` as gone (the TTL
+    monitor only runs about once a minute).
+34. **Only code unloads tools.** On resume, loaded ids no longer in the catalog are
+    dropped (`{"drop": [...]}` through the `loaded_tools` reducer) with a one-turn
+    `notices` line after the catalog; with no notice the prompt is unchanged.
+35. **Persistence tests use real MongoDB** (`mongo_db` fixture, skipped when it is
+    down); `memory` stays the default, so earlier tests never need it.
+
 ## Verified library APIs (Stage 2, pinned versions)
 
 Pinned: `deepagents==0.7.21`, `langchain==1.4.3`, `langgraph==1.2.12`,
@@ -184,10 +215,34 @@ Confirmed against the Stage 2 pins:
 - **Checkpoint deadlock (langgraph 1.2.12)**: with the default
   `durability="async"`, each step's checkpoint write waits on the previous one in
   the run's thread pool; a turn with many steps can fill the pool and hang.
-  `invoke_turn` passes `durability="sync"` when a thread is set — but not
-  without one: 1.2.12's `"sync"` then fails on a write it never made.
+  `invoke_turn` passes `conversation.checkpoint_durability` (`exit` since Stage 6,
+  or `sync`) when a thread is set — but not without one: 1.2.12's `"sync"` then
+  fails on a write it never made.
 - pytest: run long agent suites with `--tb=short` or `--tb=line`; the default
   traceback diffs huge message lists and can look like a hang.
+
+## Verified library APIs (Stage 6)
+
+Confirmed against the Stage 2-3 pins (`langgraph-checkpoint==4.2.0`):
+
+- **DeltaChannels**: deepagents 0.7.21 declares `messages` and `files` as
+  `DeltaChannel(..., snapshot_frequency=50)`. A checkpoint's `channel_values`
+  holds only a marker for them (a `_DeltaSnapshot` every 50 updates); values are
+  rebuilt by `get_delta_channel_history`, walking `parent_config` and each
+  ancestor's pending writes. A saver must keep the chain and return a
+  checkpoint's pending writes in insertion order.
+- **`durability="exit"`** writes 1-2 checkpoints per turn (vs ~30-60 with
+  `"sync"`) and reloads every channel, delta ones included (parity suite in
+  `tests/test_mongo_saver.py`, with a snapshot crossing).
+- **InMemorySaver write semantics** (mirrored by `MongoCheckpointSaver`): a
+  regular write is kept once per `(task_id, idx)`; a special one (negative
+  `WRITES_IDX_MAP` index) is replaced; versions are `f"{n:032}.{random:016}"`.
+- **`langgraph-checkpoint-mongodb==0.5.0`** needs `pymongo<4.18` (we pin 4.18.2)
+  and pulls `langchain-mongodb` + numpy; not used.
+- **PyMongo**: `ConnectionFailure` (incl. `ServerSelectionTimeoutError`) is not a
+  builtin `ConnectionError`; datetimes come back naive UTC (`clock.as_utc`).
+- **shapely 2**: `to_wkt` rounds to 6 decimals by default; `rounding_precision=-1`
+  round-trips exactly. WKB is exact.
 
 ## How to add a tool
 
@@ -237,11 +292,12 @@ tools that are in no seed file; `delete <source_id>` removes one.
   real model: `uv run python -m evals.run --suite stage2` and
   `uv run python -m evals.run --suite stage4 --harness trimmed` and
   `uv run python -m evals.run --suite stage5 --harness trimmed` (need MongoDB;
-  seed and drop a `geosearch_eval` database). Places replay
+  seed and drop a `geosearch_eval` database). Add `--store mongodb --restart` to
+  run conversations on MongoDB with a restart between turns (Stage 6). Places replay
   `fixtures/places/` unless `GEOSEARCH_PLACES__PROVIDER=google` (needs a key);
   `scripts/record_places.py` records real fixtures.
-- MongoDB (tool registry, Stage 3) runs via `docker compose up -d`; registry
-  tests skip without it. The app is started with
+- MongoDB (tool registry, Stage 3; conversations, Stage 6) runs via
+  `docker compose up -d`; registry and persistence tests skip without it. The app is started with
   `uv run uvicorn geosearch.api.main:app`. Only `api/main.py` builds an app at
   import time; everything else imports `create_app` from `api/app.py`.
 - `src/` layout. Type hints everywhere.
