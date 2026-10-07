@@ -10,6 +10,13 @@ A suite with `registry: scale` (stage4, stage5) needs MongoDB: it seeds a throwa
 agent from that catalog, and drops the database afterwards. The fakes are
 registered on this process's handler allowlist only.
 
+Conversations persist on `--store memory` (default) or `--store mongodb`
+(Stage 6: checkpoints, records and areas in the same `geosearch_eval`
+database, dropped afterwards). `--restart` (mongodb only) reopens persistence
+and rebuilds the agent between turns, as a restarted API process would:
+
+    uv run python -m evals.run --suite stage5 --harness trimmed --store mongodb --restart
+
 Deterministic checks only; small models vary between runs, so a pass *rate*
 across runs is more informative than a single pass/fail.
 """
@@ -17,7 +24,6 @@ across runs is more informative than a single pass/fail.
 import argparse
 import json
 import statistics
-import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -26,19 +32,21 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph.state import CompiledStateGraph
 
 from evals.checks import TurnOutcome, TurnResult, evaluate_turn
 from geosearch import sources
 from geosearch.agent.build import build_agent
 from geosearch.agent.context import AgentContext
+from geosearch.agent.conversations import ConversationRegistry
 from geosearch.agent.ledger import LedgerRecord, TokenLedger
 from geosearch.agent.model import build_chat_model
-from geosearch.agent.run import build_new_turn_state, invoke_turn
+from geosearch.agent.persistence import Persistence, open_persistence
+from geosearch.agent.run import RequestRunner
 from geosearch.config import GeoConfig
-from geosearch.geo.area_store import InMemoryAreaStore, area_to_wkt
 from geosearch.geo.buffer import STRATEGIES
 from geosearch.geo.ops import AreaOps
 from geosearch.registry.catalog import CatalogCache, CatalogSnapshot
@@ -47,7 +55,6 @@ from geosearch.registry.mongo import connect, ping
 from geosearch.registry.seeding import seed
 from geosearch.registry.store import MongoRegistry
 from geosearch.request.models import UserRequest
-from geosearch.request.validate import validate_request
 from geosearch.sources.fakes import FAKE_DEFINITIONS, FAKES, register_fakes
 
 SUITE_DIR = Path(__file__).parent / "cases"
@@ -115,6 +122,24 @@ def _catalog_for(suite: dict, cfg: GeoConfig) -> Iterator[CatalogSnapshot | None
         client.close()
 
 
+@contextmanager
+def _eval_database(store: str) -> Iterator[None]:
+    """With `--store mongodb`, conversations go to the throwaway eval database:
+    start it empty and drop it at the end, also for suites without a registry."""
+    if store != "mongodb":
+        yield
+        return
+    client = connect(GeoConfig(_env_file=None).mongo)
+    if not ping(client):
+        raise SystemExit("MongoDB not running: docker compose up -d")
+    client.drop_database(EVAL_DB)
+    try:
+        yield
+    finally:
+        client.drop_database(EVAL_DB)
+        client.close()
+
+
 def _selection_scores(selections: list[tuple[list[int], list[int]]]) -> tuple[float, float]:
     """Mean precision and recall of what was loaded vs expected, per turn.
     An empty expectation met by loading nothing scores 1/1."""
@@ -128,6 +153,49 @@ def _selection_scores(selections: list[tuple[list[int], list[int]]]) -> tuple[fl
     return statistics.mean(precisions), statistics.mean(recalls)
 
 
+class _FixedAgents:
+    """The eval's catalog is a fixed snapshot: no registry revision to follow."""
+
+    def __init__(self, agent: CompiledStateGraph, snapshot: CatalogSnapshot):
+        self.agent, self.snapshot = agent, snapshot
+
+    def current(self) -> CompiledStateGraph:
+        return self.agent
+
+    def current_with_catalog(self) -> tuple[CompiledStateGraph, CatalogSnapshot]:
+        return self.agent, self.snapshot
+
+
+@dataclass
+class _EvalRunner(RequestRunner):
+    """The app's RequestRunner, keeping each turn's ledger for the report."""
+
+    ledgers: list[TokenLedger] = field(default_factory=list)
+
+    def _context(self) -> AgentContext:
+        ledger = TokenLedger()
+        self.ledgers.append(ledger)
+        return AgentContext(area_ops=self.ops, cfg=self.cfg, ledger=ledger)
+
+
+def _open_runner(
+    cfg: GeoConfig, model: BaseChatModel, catalog: CatalogSnapshot | None
+) -> tuple[_EvalRunner, Persistence]:
+    """Everything a process builds at startup, wired as create_app wires it."""
+    persistence = open_persistence(cfg)
+    store = persistence.area_store
+    agent = build_agent(cfg, model, persistence.checkpointer, catalog)
+    registry = ConversationRegistry(
+        cfg.conversation, persistence.checkpointer, store=persistence.conversations
+    )
+    runner = _EvalRunner(
+        cfg, _FixedAgents(agent, catalog or CatalogSnapshot()), registry, store, AreaOps(store),
+        STRATEGIES[cfg.point_buffer.strategy](cfg.point_buffer),
+        keep_alive=persistence.keep_alive,
+    )  # fmt: skip
+    return runner, persistence
+
+
 def _run_case(
     case: dict,
     cfg: GeoConfig,
@@ -135,98 +203,91 @@ def _run_case(
     default_wkt: str,
     catalog: CatalogSnapshot | None = None,
     raw_markers: list[str] | None = None,
+    restart: bool = False,
 ) -> RunRecord:
-    """Execute every turn of a case in one conversation, collecting per-turn
-    results and the token ledger for each turn (fresh context per turn)."""
-    store = InMemoryAreaStore(max_entries=cfg.area_store.max_entries)
-    ops = AreaOps(store)
-    buffer_strategy = STRATEGIES[cfg.point_buffer.strategy](cfg.point_buffer)
-    checkpointer = InMemorySaver()
-    agent = build_agent(cfg, model, checkpointer, catalog)
-    conversation_id = uuid.uuid4().hex
+    """Execute every turn of a case in one conversation through RequestRunner,
+    collecting per-turn results and the token ledger for each turn. With
+    `restart`, every turn after the first runs on freshly opened persistence
+    and a rebuilt agent."""
+    runner, persistence = _open_runner(cfg, model, catalog)
 
     wkt = case.get("wkt", default_wkt)
     turn_outcomes: list[TurnOutcome] = []
     all_records: list[LedgerRecord] = []
-    area_id = area_wkt = area_summary = ""
+    conversation_id = area_id = ""
     prev_len = 0
     prev_loaded: list[int] = []
     selections: list[tuple[list[int], list[int]]] = []
     answer_sources: list[str] = []
     summarizer_calls: list[int] = []
 
-    for i, turn in enumerate(case["turns"], start=1):
-        ledger = TokenLedger()
-        context = AgentContext(area_ops=ops, cfg=cfg, ledger=ledger)
-        if i == 1:
-            validated = validate_request(
-                UserRequest(wkt=wkt, prompt=turn["prompt"]), cfg, store, ops, buffer_strategy
+    try:
+        for i, turn in enumerate(case["turns"], start=1):
+            if i == 1:
+                req = UserRequest(wkt=wkt, prompt=turn["prompt"])
+            else:
+                if restart:
+                    persistence.close()
+                    runner, persistence = _open_runner(cfg, model, catalog)
+                req = UserRequest(prompt=turn["prompt"], conversation_id=conversation_id)
+            outcome = runner.handle(req)
+            ledger = runner.ledgers[-1]
+            ops = runner.ops
+            conversation_id = outcome.conversation_id
+            area_id = outcome.state["conversation"]["area_id"]
+            new_messages = outcome.state["messages"][prev_len:]
+            prev_len = len(outcome.state["messages"])
+            tools_called = [
+                tc["name"] for m in new_messages if isinstance(m, AIMessage) for tc in m.tool_calls
+            ]
+            loaded = list(outcome.state.get("loaded_tools") or [])
+            newly_loaded = [i for i in loaded if i not in prev_loaded]
+            prev_loaded = loaded
+            if "expect_loaded" in turn:
+                selections.append((list(turn["expect_loaded"]), newly_loaded))
+            tool_results = [
+                (m.name or "", str(m.content)) for m in new_messages if isinstance(m, ToolMessage)
+            ]
+            tools_offered: set[str] = set()
+            for record in ledger.records:
+                tools_offered.update(record.tools_offered)
+            results_read = [
+                str(tc["args"].get("file_path") or tc["args"].get("path") or "")
+                for m in new_messages
+                if isinstance(m, AIMessage)
+                for tc in m.tool_calls
+                if tc["name"] in ("read_file", "ls")
+                and "/results" in str(tc["args"].get("file_path") or tc["args"].get("path") or "")
+            ]
+            summarizer_calls.append(ledger.summary().summarizer_calls)
+
+            result = TurnResult(
+                prompt=turn["prompt"],
+                answer=outcome.answer,
+                tools_called=tools_called,
+                tools_offered=tools_offered,
+                usage=ledger.summary(),
+                records=ledger.records,
+                effective_input_budget=cfg.budget.effective_input_budget,
+                newly_loaded=newly_loaded,
+                tool_results=tool_results,
+                answer_source=outcome.answer_source,
+                item_ids=[item.id for item in outcome.items],
+                items_inside=[
+                    item.lon is not None
+                    and item.lat is not None
+                    and ops.contains(area_id, item.lon, item.lat)
+                    for item in outcome.items
+                ],
+                main_context="\n".join(str(m.content) for m in new_messages),
+                raw_markers=list(raw_markers or []),
+                results_read=results_read,
             )
-            area_id = validated.area_id
-            area_wkt = area_to_wkt(store.get(area_id))
-            area_summary = validated.area_summary
-        state = build_new_turn_state(
-            conversation_id=conversation_id,
-            area_id=area_id,
-            area_wkt=area_wkt,
-            area_summary=area_summary,
-            request_id=uuid.uuid4().hex,
-            prompt=turn["prompt"],
-            turn=i,
-        )
-        outcome = invoke_turn(agent, context, state, thread_id=conversation_id)
-
-        new_messages = outcome.state["messages"][prev_len:]
-        prev_len = len(outcome.state["messages"])
-        tools_called = [
-            tc["name"] for m in new_messages if isinstance(m, AIMessage) for tc in m.tool_calls
-        ]
-        loaded = list(outcome.state.get("loaded_tools") or [])
-        newly_loaded = [i for i in loaded if i not in prev_loaded]
-        prev_loaded = loaded
-        if "expect_loaded" in turn:
-            selections.append((list(turn["expect_loaded"]), newly_loaded))
-        tool_results = [
-            (m.name or "", str(m.content)) for m in new_messages if isinstance(m, ToolMessage)
-        ]
-        tools_offered: set[str] = set()
-        for record in ledger.records:
-            tools_offered.update(record.tools_offered)
-        results_read = [
-            str(tc["args"].get("file_path") or tc["args"].get("path") or "")
-            for m in new_messages
-            if isinstance(m, AIMessage)
-            for tc in m.tool_calls
-            if tc["name"] in ("read_file", "ls")
-            and "/results" in str(tc["args"].get("file_path") or tc["args"].get("path") or "")
-        ]
-        summarizer_calls.append(ledger.summary().summarizer_calls)
-
-        result = TurnResult(
-            prompt=turn["prompt"],
-            answer=outcome.answer,
-            tools_called=tools_called,
-            tools_offered=tools_offered,
-            usage=ledger.summary(),
-            records=ledger.records,
-            effective_input_budget=cfg.budget.effective_input_budget,
-            newly_loaded=newly_loaded,
-            tool_results=tool_results,
-            answer_source=outcome.answer_source,
-            item_ids=[item.id for item in outcome.items],
-            items_inside=[
-                item.lon is not None
-                and item.lat is not None
-                and ops.contains(area_id, item.lon, item.lat)
-                for item in outcome.items
-            ],
-            main_context="\n".join(str(m.content) for m in new_messages),
-            raw_markers=list(raw_markers or []),
-            results_read=results_read,
-        )
-        answer_sources.append(outcome.answer_source)
-        turn_outcomes.append(evaluate_turn(result, turn["checks"]))
-        all_records.extend(ledger.records)
+            answer_sources.append(outcome.answer_source)
+            turn_outcomes.append(evaluate_turn(result, turn["checks"]))
+            all_records.extend(ledger.records)
+    finally:
+        persistence.close()
 
     return RunRecord(
         turns=turn_outcomes,
@@ -293,10 +354,12 @@ def _answer_stats(reports: list[CaseReport]) -> dict[str, float]:
     }
 
 
-def _run_suite(suite: dict, runs: int, harness: str) -> dict:
+def _run_suite(suite: dict, runs: int, harness: str, store: str, restart: bool) -> dict:
     """Run every case `runs` times for one harness and return its payload dict."""
     cfg = GeoConfig(_env_file=None)
     cfg.agent.harness = harness
+    cfg.conversation.store = store
+    cfg.mongo.database = EVAL_DB  # registry and conversations: one throwaway database
     model = build_chat_model(cfg.llm, cfg.budget)
     default_wkt = suite["wkt"]
 
@@ -306,7 +369,9 @@ def _run_suite(suite: dict, runs: int, harness: str) -> dict:
             case_report = CaseReport(name=case["name"])
             for _ in range(runs):
                 case_report.runs.append(
-                    _run_case(case, cfg, model, default_wkt, catalog, suite.get("raw_markers"))
+                    _run_case(
+                        case, cfg, model, default_wkt, catalog, suite.get("raw_markers"), restart
+                    )
                 )
             reports.append(case_report)
             print(f"  {harness:8s} {case['name']:24s} {case_report.pass_rate:.0%}")
@@ -315,6 +380,8 @@ def _run_suite(suite: dict, runs: int, harness: str) -> dict:
     return {
         "suite": suite.get("name", "stage2"),
         "harness": harness,
+        "store": store,
+        "restart": restart,
         "runs": runs,
         "model": cfg.llm.model,
         "provider": cfg.llm.provider,
@@ -358,6 +425,8 @@ def _combined_markdown(suite: str, stamp: str, payloads: list[dict]) -> str:
         f"- Runs per case: {first['runs']}",
         f"- Effective input budget: {first['effective_input_budget']} tokens",
         f"- Harnesses: {', '.join(p['harness'] for p in payloads)}",
+        f"- Conversation store: {first['store']}"
+        + (" (restart between turns)" if first["restart"] else ""),
         f"- Generated: {stamp}",
         "",
         "## Pass rate by case",
@@ -450,14 +519,19 @@ def main() -> None:
     parser.add_argument("--suite", default="stage2")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--harness", choices=["default", "trimmed", "both"], default="both")
+    parser.add_argument("--store", choices=["memory", "mongodb"], default="memory")
+    parser.add_argument("--restart", action="store_true", help="restart between turns (mongodb)")
     args = parser.parse_args()
+    if args.restart and args.store != "mongodb":
+        raise SystemExit("--restart needs --store mongodb: memory doesn't survive a restart")
 
     suite = yaml.safe_load((SUITE_DIR / f"{args.suite}.yaml").read_text())
     harnesses = ["default", "trimmed"] if args.harness == "both" else [args.harness]
 
     REPORT_DIR.mkdir(exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    payloads = [_run_suite(suite, args.runs, h) for h in harnesses]
+    with _eval_database(args.store):
+        payloads = [_run_suite(suite, args.runs, h, args.store, args.restart) for h in harnesses]
 
     for payload in payloads:
         path = REPORT_DIR / f"{stamp}-{args.suite}-{payload['harness']}.json"
