@@ -134,6 +134,9 @@ class ConversationConfig(BaseModel):
     conversations_collection: str = "conversations"
     areas_collection: str = "areas"
     checkpoint_warn_bytes: int = 4_000_000  # warn-only; MongoDB's document limit is 16 MB
+    # When a turn's state is checkpointed: "exit" once at the end of the run (1-2
+    # checkpoints a turn), "sync" after every step (~30-60). Stage 6 D1.
+    checkpoint_durability: Literal["exit", "sync"] = "exit"
 
     @property
     def collection_names(self) -> tuple[str, ...]:

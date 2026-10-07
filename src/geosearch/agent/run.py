@@ -133,13 +133,13 @@ def invoke_turn(
     checkpointing for conversations.
     """
     config = {"configurable": {"thread_id": thread_id}} if thread_id else {}
-    # durability="sync" when checkpointing: with the default "async", each step's
-    # checkpoint write runs on the run's thread pool and waits for the previous
-    # write; a turn with enough steps (each model call passes several middleware
-    # nodes) can fill the pool with waiting writes and deadlock (seen with
-    # langgraph 1.2.12). Writing inline costs ~nothing for the in-memory saver.
-    # Not without a thread: 1.2.12's "sync" then waits on a write it never made.
-    durability = "sync" if thread_id else None
+    # Never the default "async": each step's checkpoint write then runs on the
+    # run's thread pool and waits for the previous one, and a turn with enough
+    # steps can fill the pool and deadlock (langgraph 1.2.12). "exit" (the
+    # default) checkpoints once when the run ends, which also keeps a MongoDB
+    # thread small; "sync" writes inline after every step. Not without a thread:
+    # 1.2.12's "sync" then waits on a write it never made.
+    durability = context.cfg.conversation.checkpoint_durability if thread_id else None
     result = agent.invoke(state_update, context=context, config=config, durability=durability)
 
     messages = result.get("messages", [])
