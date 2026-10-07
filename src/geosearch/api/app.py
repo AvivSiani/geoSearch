@@ -1,7 +1,7 @@
 """The app factory. request/ and geo/ hold the deterministic logic; agent/ holds
 the agent; this module wires them together once and exposes the route.
 
-The model, persistence (checkpointer + area store), conversation registry, agent
+The model, persistence (checkpointer, records, areas), conversation registry, agent
 and tool catalog are built once at startup and kept on app.state. A model
 instance can be injected (tests pass a scripted model; nothing here imports a
 provider class — agent/model.py owns that), and so can the tool registry (the
@@ -42,9 +42,13 @@ def create_app(
 
     model = model or build_chat_model(cfg.llm, cfg.budget)
     checkpointer = persistence.checkpointer
-    registry = ConversationRegistry(cfg.conversation, checkpointer)
+    registry = ConversationRegistry(
+        cfg.conversation, checkpointer, store=persistence.conversations
+    )
     agents = AgentHolder(cfg, model, checkpointer, catalog)  # rebuilds on registry change
-    runner = RequestRunner(cfg, agents, registry, store, ops, buffer_strategy)
+    runner = RequestRunner(
+        cfg, agents, registry, store, ops, buffer_strategy, keep_alive=persistence.keep_alive
+    )
 
     app = FastAPI(title="GeoSearch Agent")
     app.state.cfg = cfg

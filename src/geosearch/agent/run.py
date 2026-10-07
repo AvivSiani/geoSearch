@@ -6,14 +6,22 @@ Two layers live here:
     turn: it decides new-conversation vs follow-up, enforces area binding, seeds
     working memory, and drives the ConversationRegistry.
 
-The area store is Stage 1's in-memory LRU. Because it can evict, a follow-up
-re-puts the conversation's stored WKT before the turn: the content-hash id is
-stable, so the same area_id comes back (Stage 2 §10).
+Each finished turn is recorded in the conversation record (Stage 6, D4): after
+the checkpoint, so the record never claims a turn the state lacks. If that write
+was lost, the next follow-up backfills it from the checkpoint. `keep_alive` then
+pushes out the expiry of everything the conversation needs (its checkpoints and
+its area); it is a no-op on the memory backend.
+
+The area store may be Stage 1's in-memory LRU, which can evict: a follow-up
+restores the area from the checkpoint's full-precision WKT if needed (the
+content-hash id is stable, so the same area_id comes back).
 """
 
 import json
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Literal
 
 import shapely
@@ -26,6 +34,7 @@ from geosearch.agent.context import AgentContext
 from geosearch.agent.conversations import ConversationRegistry
 from geosearch.agent.holder import AgentHolder
 from geosearch.agent.ledger import TokenLedger
+from geosearch.clock import Clock, utc_now
 from geosearch.config import GeoConfig
 from geosearch.errors import ErrorCode, GeoValidationError
 from geosearch.geo.area_store import AreaNotFound, AreaStore, area_to_wkt
@@ -160,6 +169,51 @@ def invoke_turn(
     )
 
 
+def turn_entry(outcome: TurnOutcome, started_at: datetime, finished_at: datetime) -> dict:
+    """The readable record of a finished turn: no state, no provider ids, no rows."""
+    usage = outcome.usage
+    return {
+        "request_id": outcome.request_id,
+        "prompt": outcome.state["request"]["prompt"],
+        "answer": outcome.answer,
+        "item_ids": [item.id for item in outcome.items],
+        "answer_source": outcome.answer_source,
+        "stopped_reason": outcome.stopped_reason,
+        "tokens": {
+            "model_calls": usage.model_calls,
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+            "summarizer_calls": usage.summarizer_calls,
+            "summarizer_input_tokens": usage.summarizer_input_tokens,
+        },
+        "started_at": started_at,
+        "finished_at": finished_at,
+    }
+
+
+def recovered_entry(values: dict[str, Any], now: datetime) -> dict:
+    """A turn whose record write was lost, rebuilt from its checkpoint. Token
+    totals lived only in that request's ledger, so they are unknown."""
+    messages = values.get("messages", [])
+    answer, items, source = final_answer(values, _last_ai_text(messages))
+    return {
+        "request_id": values["request"]["request_id"],
+        "prompt": values["request"]["prompt"],
+        "answer": answer,
+        "item_ids": [item.id for item in items],
+        "answer_source": source,
+        "stopped_reason": "call_limit" if _was_call_limited(messages) else "finished",
+        "tokens": None,
+        "started_at": None,
+        "finished_at": now,
+        "recovered": True,
+    }
+
+
+def _no_keep_alive(conversation_id: str, area_id: str) -> None:
+    return None
+
+
 @dataclass
 class RequestRunner:
     """Turns a UserRequest into one agent turn. Built once (app startup) and
@@ -173,6 +227,8 @@ class RequestRunner:
     store: AreaStore
     ops: AreaOps
     buffer_strategy: BufferStrategy
+    keep_alive: Callable[[str, str], None] = _no_keep_alive  # (conversation_id, area_id)
+    clock: Clock = utc_now
 
     def _context(self) -> AgentContext:
         return AgentContext(area_ops=self.ops, cfg=self.cfg, ledger=TokenLedger())
@@ -197,12 +253,27 @@ class RequestRunner:
         if restored != area_id:
             raise AreaNotFound(f"{area_id} restored as {restored}")
 
+    def _run_and_record(
+        self,
+        agent: CompiledStateGraph,
+        state: dict[str, Any],
+        conversation_id: str,
+        turn: int,
+        area_id: str,
+    ) -> TurnOutcome:
+        started_at = self.clock()
+        outcome = invoke_turn(agent, self._context(), state, thread_id=conversation_id)
+        entry = turn_entry(outcome, started_at, self.clock())
+        self.registry.record_turn(conversation_id, turn, entry)
+        self.keep_alive(conversation_id, area_id)
+        return outcome
+
     def _new_conversation(self, agent: CompiledStateGraph, req: UserRequest) -> TurnOutcome:
         validated = validate_request(req, self.cfg, self.store, self.ops, self.buffer_strategy)
         area_wkt = area_to_wkt(self.store.get(validated.area_id))
-        conversation_id = self.registry.create(validated.area_id)
+        conversation_id = self.registry.create(validated.area_id, validated.area_summary)
 
-        with self.registry.turn(conversation_id) as (_entry, turn):
+        with self.registry.turn(conversation_id) as (_record, turn):
             state = build_new_turn_state(
                 conversation_id=conversation_id,
                 area_id=validated.area_id,
@@ -217,7 +288,22 @@ class RequestRunner:
             state["intent"] = None
             state["loaded_tools"] = []
             state["items"] = {}
-            return invoke_turn(agent, self._context(), state, thread_id=conversation_id)
+            return self._run_and_record(agent, state, conversation_id, turn, validated.area_id)
+
+    def _reconcile(
+        self, conversation_id: str, snapshot: Any, recorded_turns: int, turn: int
+    ) -> int:
+        """If the checkpoint holds a finished turn the record lacks (its record
+        write failed), backfill it and return the next turn number. A run that
+        died mid-turn has pending nodes (`next`) and is not counted."""
+        state_turn = snapshot.values["conversation"]["turn"]
+        if state_turn == recorded_turns + 1 and not snapshot.next:
+            self.registry.record_turn(
+                conversation_id, state_turn, recovered_entry(snapshot.values, self.clock())
+            )
+            turn = state_turn + 1
+            self.registry.check_cap(conversation_id, turn)
+        return turn
 
     def _follow_up(self, agent: CompiledStateGraph, req: UserRequest) -> TurnOutcome:
         conversation_id = req.conversation_id
@@ -230,13 +316,26 @@ class RequestRunner:
         check_prompt_present(req.prompt)
         check_prompt_length(req.prompt, self.cfg.limits.max_prompt_chars)
 
-        with self.registry.turn(conversation_id) as (entry, turn):
-            stored = agent.get_state(
-                {"configurable": {"thread_id": conversation_id}}
-            ).values["conversation"]
+        with self.registry.turn(conversation_id) as (record, turn):
+            snapshot = agent.get_state({"configurable": {"thread_id": conversation_id}})
+            if "conversation" not in snapshot.values:
+                # A record without state: its checkpoints expired or were lost.
+                self.registry.forget(conversation_id)
+                raise GeoValidationError(
+                    ErrorCode.CONVERSATION_NOT_FOUND,
+                    "conversation state is gone",
+                    {"conversation_id": conversation_id},
+                )
+            stored = snapshot.values["conversation"]
             area_id = stored["area_id"]
             area_wkt = stored["area_wkt"]
             area_summary = stored["area_summary"]
+            if area_id != record.area_id:  # two stores disagree: a bug, never ignored
+                raise RuntimeError(
+                    f"conversation {conversation_id}: record area {record.area_id} "
+                    f"!= state area {area_id}"
+                )
+            turn = self._reconcile(conversation_id, snapshot, record.turn_count, turn)
 
             # Area binding: a re-sent WKT must resolve to the same area_id.
             if req.wkt is not None:
@@ -267,4 +366,4 @@ class RequestRunner:
                 prompt=req.prompt.strip(),
                 turn=turn,
             )
-            return invoke_turn(agent, self._context(), state, thread_id=conversation_id)
+            return self._run_and_record(agent, state, conversation_id, turn, area_id)

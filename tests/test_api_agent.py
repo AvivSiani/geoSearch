@@ -55,8 +55,8 @@ def test_conversation_busy_returns_409() -> None:
     ).json()
 
     # Hold the conversation's lock to simulate a turn already in flight.
-    entry = app.state.runner.registry._entries[first["conversation_id"]]
-    entry.lock.acquire()
+    lock = app.state.runner.registry._lock_for(first["conversation_id"])
+    lock.acquire()
     try:
         response = client.post(
             "/v1/requests",
@@ -65,7 +65,7 @@ def test_conversation_busy_returns_409() -> None:
         assert response.status_code == 409
         assert response.json()["code"] == ErrorCode.CONVERSATION_BUSY
     finally:
-        entry.lock.release()
+        lock.release()
 
 
 def test_response_carries_items_and_answer_source() -> None:

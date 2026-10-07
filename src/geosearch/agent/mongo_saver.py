@@ -22,8 +22,8 @@ pending writes come back in insertion order, which delta replay depends on.
 import logging
 import random
 import time
-from collections.abc import AsyncIterator, Callable, Iterator, Sequence
-from datetime import UTC, datetime, timedelta
+from collections.abc import AsyncIterator, Iterator, Sequence
+from datetime import datetime, timedelta
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -41,15 +41,10 @@ from pymongo import ASCENDING, DESCENDING, UpdateOne
 from pymongo.collection import Collection
 from pymongo.database import Database
 
+from geosearch.clock import Clock, utc_now
 from geosearch.config import ConversationConfig
 
 log = logging.getLogger(__name__)
-
-Clock = Callable[[], datetime]
-
-
-def utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 class MongoCheckpointSaver(BaseCheckpointSaver[str]):

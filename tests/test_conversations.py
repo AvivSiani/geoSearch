@@ -3,6 +3,7 @@ area binding and re-put, working-memory seeds, and the three conversation-level
 errors (busy, limit, expiry)."""
 
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import shapely
@@ -26,9 +27,9 @@ class FakeClock:
     """A manually advanced clock, so idle-TTL expiry is testable without sleeping."""
 
     def __init__(self) -> None:
-        self.now = 1000.0
+        self.now = datetime(2026, 1, 1, tzinfo=UTC)
 
-    def __call__(self) -> float:
+    def __call__(self) -> datetime:
         return self.now
 
 
@@ -162,14 +163,14 @@ def test_conversation_busy_when_lock_held() -> None:
     runner = _runner(responses=[ai("a1"), ai("a2")])
     first = runner.handle(UserRequest(wkt=HANDOFF_POLYGON, prompt="q1"))
     # Simulate a turn already running by holding the conversation's lock.
-    entry = runner.registry._entries[first.conversation_id]
-    entry.lock.acquire()
+    lock = runner.registry._lock_for(first.conversation_id)
+    lock.acquire()
     try:
         with pytest.raises(GeoValidationError) as exc:
             runner.handle(UserRequest(prompt="q2", conversation_id=first.conversation_id))
         assert exc.value.code == ErrorCode.CONVERSATION_BUSY
     finally:
-        entry.lock.release()
+        lock.release()
 
 
 def test_conversation_limit_reached() -> None:
@@ -186,7 +187,8 @@ def test_idle_expiry_is_not_found() -> None:
     runner = _runner(responses=[ai("a1"), ai("a2")], clock=clock)
     first = runner.handle(UserRequest(wkt=HANDOFF_POLYGON, prompt="q1"))
     # Advance just past the idle TTL.
-    clock.now += GeoConfig(_env_file=None).conversation.idle_ttl_minutes * 60 + 1
+    ttl_minutes = GeoConfig(_env_file=None).conversation.idle_ttl_minutes
+    clock.now += timedelta(minutes=ttl_minutes, seconds=1)
     with pytest.raises(GeoValidationError) as exc:
         runner.handle(UserRequest(prompt="q2", conversation_id=first.conversation_id))
     assert exc.value.code == ErrorCode.CONVERSATION_NOT_FOUND
