@@ -5,7 +5,9 @@
   - If the model replies without tool calls and nothing was submitted, it gets
     one reminder and one more call (an after_model jump back to the model).
   - If it still doesn't submit (or the call limit stops the run), the system
-    falls back: the last reply, with citations limited to known items.
+    falls back: the turn's last reply that has text (never an empty closing
+    message, never an earlier turn's reply), with citations limited to known
+    items.
 
 Either way the response's items are built here from `state.items` — data the
 tools returned — never from model text. The provider ref stays server-side.

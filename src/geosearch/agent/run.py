@@ -26,10 +26,10 @@ from typing import Any, Literal
 
 import shapely
 from deepagents.backends.state import create_file_data
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph.state import CompiledStateGraph
 
-from geosearch.agent.answer import AnswerSource, final_answer
+from geosearch.agent.answer import REMINDER, AnswerSource, final_answer
 from geosearch.agent.context import AgentContext
 from geosearch.agent.conversations import ConversationRegistry
 from geosearch.agent.holder import AgentHolder
@@ -118,9 +118,19 @@ def _seed_files(area_summary: str, turn: int, request_id: str, prompt: str) -> d
 
 
 def _last_ai_text(messages: list[Any]) -> str:
+    """The fallback answer: this turn's last AI reply that has text.
+
+    A small model may answer in plain text, get the submit reminder, and then
+    end on an empty message (or a tool call with no text); the answer is the
+    reply it gave before that. The search stops at the turn's own prompt (the
+    reminder belongs to the turn), so an earlier turn's reply is never reused."""
     for message in reversed(messages):
+        if isinstance(message, HumanMessage) and message.content != REMINDER:
+            break
         if isinstance(message, AIMessage):
-            return message.text if hasattr(message, "text") else str(message.content)
+            text = message.text if hasattr(message, "text") else str(message.content)
+            if text.strip():
+                return text
     return ""
 
 

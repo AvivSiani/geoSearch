@@ -4,14 +4,14 @@ items built from data. Scripted model; items are seeded straight into state."""
 import shapely
 from conftest import HANDOFF_POLYGON
 from langchain_core.messages import HumanMessage, ToolMessage
-from scripted_model import ScriptedChatModel, ai, submit
+from scripted_model import ScriptedChatModel, ai, submit, tool_call
 
 from geosearch.agent.answer import REMINDER, build_items, final_answer
 from geosearch.agent.build import build_agent
 from geosearch.agent.context import AgentContext
 from geosearch.agent.conversations import make_checkpointer
 from geosearch.agent.prompts import SYSTEM_PROMPT
-from geosearch.agent.run import TurnOutcome, build_new_turn_state, invoke_turn
+from geosearch.agent.run import TurnOutcome, _last_ai_text, build_new_turn_state, invoke_turn
 from geosearch.config import AgentConfig, GeoConfig
 from geosearch.geo.area_store import InMemoryAreaStore
 from geosearch.geo.ops import AreaOps
@@ -85,6 +85,27 @@ def test_exactly_one_reminder_then_fallback() -> None:
     assert outcome.answer_source == "fallback"
     assert outcome.answer == "Lotus [i1] and Ghost."  # invalid id stripped
     assert [i.id for i in outcome.items] == ["i1"]
+
+
+def test_fallback_skips_an_empty_closing_reply() -> None:
+    # Seen on gemma4:12b: a plain-text answer, the reminder, then a tool call and
+    # an empty message. The answer is the plain-text reply, not "".
+    outcome, model = _turn(
+        [ai("Lotus [i1] is good."), ai("", tool_calls=[tool_call("geo_describe_area")]), ai("")]
+    )
+    assert len(model.calls) == 3
+    assert outcome.answer_source == "fallback"
+    assert outcome.answer == "Lotus [i1] is good."
+    assert [i.id for i in outcome.items] == ["i1"]
+
+
+def test_fallback_never_reuses_an_earlier_turn() -> None:
+    messages = [
+        HumanMessage("turn 1"), ai("Turn one answer."),
+        HumanMessage("turn 2"), ai(""), HumanMessage(REMINDER), ai(""),
+    ]  # fmt: skip
+    assert _last_ai_text(messages) == ""
+    assert _last_ai_text([*messages[:3], ai("Two."), HumanMessage(REMINDER), ai("")]) == "Two."
 
 
 def test_reminder_can_lead_to_a_submit() -> None:

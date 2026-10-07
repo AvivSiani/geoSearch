@@ -94,7 +94,9 @@ def test_working_memory_seeds_written() -> None:
 
 
 def test_follow_up_without_wkt_works() -> None:
-    runner = _runner(responses=[ai("a1"), ai("a2")])
+    # Distinct replies per turn: the scripted model returns the same message
+    # object for a repeated response, which the reducer would merge by id.
+    runner = _runner(responses=[ai("a1"), ai("a1."), ai("a2")])
     first = runner.handle(UserRequest(wkt=HANDOFF_POLYGON, prompt="q1"))
     second = runner.handle(UserRequest(prompt="q2", conversation_id=first.conversation_id))
     assert second.answer == "a2"
