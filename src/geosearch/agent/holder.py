@@ -9,7 +9,7 @@ The rebuild happens only between requests: `current()` is called once at the
 start of a request, and the request keeps the agent it got even if another
 request triggers a rebuild meanwhile. All agents share one checkpointer, so a
 conversation continues seamlessly on the rebuilt agent — its `loaded_tools`
-carry over, and ids whose tools were deleted are simply ignored.
+carry over, and a follow-up drops ids whose tools were deleted (Stage 6).
 """
 
 import logging
@@ -56,15 +56,18 @@ class AgentHolder:
     def current(self) -> CompiledStateGraph:
         """The agent for one request: refresh the catalog (one revision read)
         and rebuild if it changed. Call once per request and keep the result."""
+        return self.current_with_catalog()[0]
+
+    def current_with_catalog(self) -> tuple[CompiledStateGraph, CatalogSnapshot]:
+        """`current()` plus the catalog that agent was built from, read
+        together so a concurrent rebuild can't pair one with the other's."""
         if self._catalog is None:
-            return self._agent
+            return self._agent, self._snapshot
         self._catalog.refresh_if_changed()
         snapshot = self._catalog.snapshot
-        if snapshot is self._snapshot:
-            return self._agent
         with self._lock:
             if snapshot is not self._snapshot:  # another request may have rebuilt already
                 self._agent = self._build(snapshot)
                 self._snapshot = snapshot
                 log.info("agent rebuilt for registry revision %s", snapshot.revision)
-            return self._agent
+            return self._agent, self._snapshot

@@ -40,6 +40,8 @@ from geosearch.errors import ErrorCode, GeoValidationError
 from geosearch.geo.area_store import AreaNotFound, AreaStore, area_to_wkt
 from geosearch.geo.buffer import BufferStrategy
 from geosearch.geo.ops import AreaOps
+from geosearch.registry.catalog import CatalogSnapshot
+from geosearch.registry.models import model_name_for
 from geosearch.request.checks import check_prompt_length, check_prompt_present
 from geosearch.request.language import detect_language
 from geosearch.request.models import ResponseItem, UsageSummary, UserRequest
@@ -97,6 +99,7 @@ def build_new_turn_state(
         "search": {"iteration": 0, "candidate_count": 0, "status": "idle"},
         "answer": None,
         "reminded": False,
+        "notices": [],
         "files": _seed_files(area_summary, turn, request_id, prompt),
     }
 
@@ -234,10 +237,10 @@ class RequestRunner:
         return AgentContext(area_ops=self.ops, cfg=self.cfg, ledger=TokenLedger())
 
     def handle(self, req: UserRequest) -> TurnOutcome:
-        agent = self.agents.current()
+        agent, catalog = self.agents.current_with_catalog()
         if req.conversation_id is None:
             return self._new_conversation(agent, req)
-        return self._follow_up(agent, req)
+        return self._follow_up(agent, catalog, req)
 
     def _restore_area(self, area_id: str, area_wkt: str) -> None:
         """Make sure the conversation's area is in the store. A persistent store
@@ -305,7 +308,9 @@ class RequestRunner:
             self.registry.check_cap(conversation_id, turn)
         return turn
 
-    def _follow_up(self, agent: CompiledStateGraph, req: UserRequest) -> TurnOutcome:
+    def _follow_up(
+        self, agent: CompiledStateGraph, catalog: CatalogSnapshot, req: UserRequest
+    ) -> TurnOutcome:
         conversation_id = req.conversation_id
         assert conversation_id is not None
         if req.wkt is None and req.point_buffer_m is not None:
@@ -366,4 +371,14 @@ class RequestRunner:
                 prompt=req.prompt.strip(),
                 turn=turn,
             )
+            # Loaded tools that left the registry since they were loaded: unload
+            # them and tell the model, so it neither expects them nor is
+            # surprised that they're gone.
+            gone = [i for i in snapshot.values.get("loaded_tools") or [] if i not in catalog]
+            if gone:
+                state["loaded_tools"] = {"drop": gone}
+                state["notices"] = [
+                    f"Tool {model_name_for(i)} is no longer available and was unloaded."
+                    for i in gone
+                ]
             return self._run_and_record(agent, state, conversation_id, turn, area_id)

@@ -47,8 +47,9 @@ def render_catalog(snapshot: CatalogSnapshot, loaded: list[int] | None) -> str:
 
 
 class CatalogMiddleware(AgentMiddleware):
-    """Appends the catalog block to the system message on every model call.
-    Appends, never replaces, so the base prompt and area line survive."""
+    """Appends the catalog block, and this turn's notices if any, to the system
+    message on every model call. Appends, never replaces, so the base prompt and
+    area line survive."""
 
     def __init__(self, snapshot: CatalogSnapshot):
         super().__init__()
@@ -64,6 +65,10 @@ class CatalogMiddleware(AgentMiddleware):
         request.runtime.context.ledger.note_catalog(
             count_tokens_approximately([SystemMessage(block)])
         )
+        # Code-written notes for this turn (Stage 6: tools that left the
+        # registry). Usually none, and then the prompt is byte-identical.
+        if notices := request.state.get("notices"):
+            block = "\n".join([block, *notices])
         base = request.system_prompt or ""
         text = f"{base}\n\n{block}" if base else block
         return handler(request.override(system_message=SystemMessage(text)))

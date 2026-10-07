@@ -1,5 +1,6 @@
 """Request/response data models. See CLAUDE.md invariant 4: area_id is never client-supplied."""
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -83,3 +84,44 @@ class AgentResponse(BaseModel):
     usage: UsageSummary
     items: list[ResponseItem] = []
     answer_source: Literal["submitted", "fallback"] = "fallback"
+
+
+class TurnTokens(BaseModel):
+    model_calls: int
+    input_tokens: int
+    output_tokens: int
+    summarizer_calls: int = 0
+    summarizer_input_tokens: int = 0
+
+
+class ConversationTurn(BaseModel):
+    """One finished turn as recorded (Stage 6). `recovered` marks a turn rebuilt
+    from its checkpoint after its record write was lost; its tokens and start
+    time are then unknown."""
+
+    turn: int
+    request_id: str
+    prompt: str
+    answer: str
+    item_ids: list[str]
+    answer_source: Literal["submitted", "fallback"]
+    stopped_reason: Literal["finished", "call_limit"]
+    tokens: TurnTokens | None
+    started_at: datetime | None
+    finished_at: datetime
+    recovered: bool = False
+
+
+class ConversationHistory(BaseModel):
+    """GET /v1/conversations/{id}: the readable history, never the agent state.
+    No WKT, provider ids or raw rows. `user_id` is a placeholder for future
+    per-user ownership and is always null for now."""
+
+    conversation_id: str
+    user_id: None
+    area_id: str
+    area_summary: str
+    created_at: datetime
+    updated_at: datetime
+    expires_at: datetime
+    turns: list[ConversationTurn]

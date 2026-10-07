@@ -19,11 +19,20 @@ from deepagents import DeepAgentState
 from geosearch.request.language import Language
 
 
-def merge_loaded_tools(left: list[int] | None, right: list[int] | None) -> list[int]:
+def merge_loaded_tools(
+    left: list[int] | None, right: list[int] | dict[str, list[int]] | None
+) -> list[int]:
     """Union, keeping first-load order. A reducer rather than a plain field so
     two `load_tools` calls in the same step both land (a plain field would make
     LangGraph reject the second write), and so a turn's `[]` initial value
-    never wipes what earlier turns loaded. There is no unloading (Stage 4)."""
+    never wipes what earlier turns loaded.
+
+    The model never unloads (Stage 4). Only code does, with `{"drop": [ids]}`:
+    a resumed conversation drops tools that left the registry (Stage 6). A plain
+    dict, so it serializes in a checkpoint like any other write."""
+    if isinstance(right, dict):
+        dropped = set(right.get("drop", []))
+        return [source_id for source_id in left or [] if source_id not in dropped]
     merged = list(left or [])
     for source_id in right or []:
         if source_id not in merged:
@@ -96,8 +105,8 @@ class GeoAgentState(DeepAgentState):
     """DeepAgentState (messages, files, todos, ...) plus our shared fields.
 
     `conversation`, `loaded_tools`, `items` and `intent` carry across turns via
-    the checkpointer; `request`, `search`, `answer` and `reminded` are
-    overwritten each turn.
+    the checkpointer; `request`, `search`, `answer`, `reminded` and `notices`
+    are overwritten each turn.
     """
 
     conversation: ConversationRef
@@ -108,3 +117,4 @@ class GeoAgentState(DeepAgentState):
     search: SearchProgress
     answer: SubmittedAnswer | None  # this turn's submit_answer; reset each turn
     reminded: bool  # this turn's submit reminder was sent; reset each turn
+    notices: list[str]  # code-written notes for the model this turn (Stage 6); reset each turn
