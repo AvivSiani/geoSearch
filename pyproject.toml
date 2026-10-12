@@ -3,9 +3,6 @@ name = "geosearch"
 version = "0.1.0"
 description = "GeoSearch Agent: a generic, spatially grounded agent"
 readme = "README.md"
-authors = [
-    { name = "Aviv Siani", email = "avivsiani120@icloud.com" }
-]
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.142.2",
