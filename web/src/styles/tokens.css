@@ -1,0 +1,72 @@
+/* Design tokens: DESIGN_SYSTEM.md is the source of truth. Do not invent values here. */
+:root {
+  color-scheme: light;
+  /* neutrals */
+  --color-bg-app: #F4F4F5;   --color-surface: #FFFFFF;   --color-surface-subtle: #FAFAFA;
+  --color-surface-muted: #F1F1F3;   --color-surface-sunken: #F4F4F5;
+  --color-border: #E4E4E7;   --color-border-strong: #D4D4D8;
+  --color-divider-soft: #F0F0F2;   --color-divider-row: #F1F1F3;
+  --color-text: #18181B;   --color-text-secondary: #46464E;   --color-text-muted: #57575F;
+  /* accent */
+  --color-accent: #2B84C9;   --color-accent-light: #5CC6F2;   --color-accent-strong: #17609C;
+  --color-accent-soft: #2B84C926;   --color-accent-fill: #2B84C929;
+  --gradient-accent: linear-gradient(135deg, var(--color-accent-light) 0%, var(--color-accent) 100%);
+  --gradient-accent-soft: linear-gradient(135deg, #5CC6F233 0%, #2B84C933 100%);
+  /* results */
+  --color-result: #7D8BFA;   --color-result-soft: #E8EBFF;   --color-result-strong: #4150C4;
+  --color-on-result: #18181B;   /* numbers on a periwinkle marker or badge, in both themes */
+  /* status */
+  --color-success: #2FA36B;   --color-success-soft: #EAF5EF;   --color-danger: #B4372A;
+  /* elevation */
+  --shadow-float: 0 2px 10px rgba(30,34,53,0.10);
+  --shadow-toolbar: 0 4px 14px rgba(30,34,53,0.12);
+  /* translucent surface for small map overlays (coordinates) */
+  --color-overlay: rgba(255,255,255,0.9);
+  /* type */
+  --font-ui: 'Rubik', system-ui, sans-serif;   --font-mono: 'IBM Plex Mono', monospace;
+  --text-brand: 600 20px/1.2 var(--font-ui);
+  --text-title: 600 16px/1.3 var(--font-ui);
+  --text-body-lg: 400 15px/1.55 var(--font-ui);
+  --text-body: 400 14px/1.35 var(--font-ui);
+  --text-label: 400 13px/1.5 var(--font-ui);
+  --text-caption: 400 12px/1.4 var(--font-ui);
+  /* spacing */
+  --space-1: 2px; --space-2: 4px; --space-3: 6px; --space-4: 8px; --space-5: 10px;
+  --space-6: 12px; --space-7: 14px; --space-8: 16px; --space-9: 18px; --space-10: 20px;
+  /* radius */
+  --radius-xs: 4px;
+  --radius-sm: 11px; --radius-md: 12px; --radius-lg: 14px; --radius-xl: 16px;
+  --radius-2xl: 20px; --radius-composer: 22px; --radius-pill: 9999px;
+  --radius-bubble: 18px 18px 18px 6px;
+  /* layout */
+  --topbar-h: 60px; --workspace-h: 840px; --map-h: 300px;
+  --panel-history: 300px; --panel-tools: 272px; --chat-max: 760px;
+  /* motion */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 150ms; --dur-panel: 200ms;
+}
+
+/*
+ * Dark theme. DESIGN_SYSTEM.md defines only the light palette; these keep the
+ * same roles: a quiet neutral frame, the sky-blue accent for what the user
+ * owns, periwinkle for results. Text contrast on --color-surface: text 15.6:1,
+ * secondary 10.4:1, muted 6.9:1; accent-strong on accent-soft 7:1.
+ * Applied when <html data-theme="dark"> (see src/theme/theme.ts).
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg-app: #0E1014;   --color-surface: #17191E;   --color-surface-subtle: #1B1E24;
+  --color-surface-muted: #24272E;   --color-surface-sunken: #1F2228;
+  --color-border: #2E323A;   --color-border-strong: #41464F;
+  --color-divider-soft: #23262D;   --color-divider-row: #23262D;
+  --color-text: #ECEDEF;   --color-text-secondary: #C6C8CE;   --color-text-muted: #A2A5AD;
+  --color-accent: #4BA3E3;   --color-accent-light: #5CC6F2;   --color-accent-strong: #9AD2F7;
+  --color-accent-soft: #4BA3E333;   --color-accent-fill: #4BA3E33D;
+  --gradient-accent: linear-gradient(135deg, #5CC6F2 0%, #2B84C9 100%);
+  --gradient-accent-soft: linear-gradient(135deg, #5CC6F240 0%, #2B84C952 100%);
+  --color-result: #7D8BFA;   --color-result-soft: #2B3057;   --color-result-strong: #C3CAFF;
+  --color-success: #3FBF82;   --color-success-soft: #1A2C24;   --color-danger: #F08273;
+  --shadow-float: 0 2px 10px rgba(0,0,0,0.45);
+  --shadow-toolbar: 0 4px 14px rgba(0,0,0,0.5);
+  --color-overlay: rgba(23,25,30,0.9);
+}

@@ -1,0 +1,31 @@
+.topbar {
+  min-height: var(--topbar-h);
+  padding: var(--space-4) var(--space-10);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+.topbar__brand { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
+.topbar__name { margin: 0; font: var(--text-brand); letter-spacing: -0.01em; }
+.topbar__accent { color: var(--color-accent); }
+.topbar__project { font: var(--text-body); color: var(--color-text-muted); }
+.topbar__avatar {
+  width: 40px; height: 40px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  display: grid; place-items: center;
+}
+.topbar__end { display: flex; align-items: center; gap: var(--space-4); }
+.topbar__theme {
+  width: 40px; height: 40px; border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent; color: var(--color-text-secondary);
+  display: grid; place-items: center;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.topbar__theme:hover { background: var(--color-surface-muted); }

@@ -1,0 +1,53 @@
+.tools-panel {
+  flex: 1 1 var(--panel-tools);
+  max-height: var(--workspace-h);
+  display: flex; flex-direction: column;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  min-width: 0;
+  animation: tools-in var(--dur-panel) var(--ease-out);
+}
+@keyframes tools-in { from { opacity: 0; } to { opacity: 1; } }
+.tools-panel__header { padding: var(--space-9) var(--space-8) var(--space-7); display: flex; flex-direction: column; gap: var(--space-4); }
+.tools-panel__title-row { display: flex; align-items: center; gap: var(--space-4); }
+.tools-panel__icon { color: var(--color-accent); }
+.tools-panel__title { margin: 0; font: var(--text-title); flex: 1 1 auto; }
+.tools-panel__explainer { margin: 0; font: var(--text-label); color: var(--color-text-muted); }
+.icon-close {
+  width: 36px; height: 36px; border: 0; border-radius: var(--radius-pill);
+  background: var(--color-surface-muted); color: var(--color-text-secondary);
+  display: grid; place-items: center;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.icon-close:hover { background: var(--color-border); }
+.tools-panel__list { flex: 1 1 auto; overflow-y: auto; padding: 0 var(--space-5) var(--space-5); }
+.tools-panel__group + .tools-panel__group { margin-top: var(--space-6); }
+.tools-panel__group-label { margin: 0 var(--space-3) var(--space-3); font: var(--text-label); font-weight: 500; color: var(--color-text-muted); }
+.tools-panel__rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+
+.tool-row {
+  display: flex; flex-direction: column; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.tool-row.is-open { background: var(--color-surface-muted); }
+.tool-row__head { display: flex; align-items: center; gap: var(--space-5); }
+.tool-row__tile {
+  width: 34px; height: 34px; flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  display: grid; place-items: center;
+}
+.tool-row.is-open .tool-row__tile { background: var(--color-surface); }
+.tool-row__name { font: var(--text-body); font-weight: 500; }
+.tool-row__desc {
+  margin-inline-start: 44px;
+  padding: var(--space-4) var(--space-6);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font: var(--text-label);
+  color: var(--color-text);
+}

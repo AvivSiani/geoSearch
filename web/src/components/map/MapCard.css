@@ -1,0 +1,218 @@
+.map-card {
+  position: relative;
+  flex: 0 0 var(--map-h);
+  height: var(--map-h);
+  border-radius: var(--radius-2xl);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  background: var(--color-surface-muted);
+  container: map-card / inline-size;
+}
+/* Expanded: the map takes the whole center column; the chat is hidden meanwhile. */
+.map-card--expanded { flex: 1 1 auto; height: auto; min-height: var(--map-h); }
+
+.map-card__map { position: absolute; inset: 0; font: var(--text-label); }
+.map-card__map .leaflet-container,
+.map-card__map.leaflet-container { background: var(--color-surface-muted); font: var(--text-label); }
+
+.gs-map-overlay { position: absolute; z-index: 500; }
+.map-card__search { top: var(--space-6); right: var(--space-6); width: min(340px, 100% - 200px); }
+.map-card__controls { top: var(--space-6); left: var(--space-6); }
+.map-card__draw { bottom: var(--space-6); right: var(--space-6); max-width: calc(100% - 2 * var(--space-6)); }
+.map-card__coords { bottom: var(--space-6); left: var(--space-6); }
+.map-card__notice {
+  top: 64px; left: 50%; transform: translateX(-50%);
+  padding: var(--space-3) var(--space-7);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+  font: var(--text-label);
+  color: var(--color-danger);
+}
+
+/* ---- floating buttons ---------------------------------------------------- */
+.map-controls { display: flex; gap: var(--space-3); align-items: center; }
+.map-btn, .map-zoom {
+  height: 42px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+  border: 0;
+}
+.map-btn {
+  width: 42px;
+  display: grid; place-items: center;
+  color: var(--color-text);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.map-btn:hover { background: var(--color-surface-muted); }
+.map-btn[aria-pressed='true'] { background: var(--color-accent-soft); color: var(--color-accent-strong); }
+.map-zoom { display: flex; align-items: center; overflow: hidden; }
+.map-zoom__btn {
+  width: 42px; height: 42px; border: 0; background: transparent;
+  display: grid; place-items: center; color: var(--color-text);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.map-zoom__btn:hover { background: var(--color-surface-muted); }
+.map-zoom__btn:focus-visible { outline-offset: -2px; }
+.map-zoom__divider { width: 1px; height: 22px; background: var(--color-border); }
+
+/* ---- search ---------------------------------------------------------------- */
+.map-search { position: relative; }
+.map-search__icon { position: absolute; top: 13px; right: var(--space-7); color: var(--color-text-muted); pointer-events: none; }
+.map-search__input {
+  width: 100%;
+  height: 42px;
+  padding: 0 calc(var(--space-7) + 16px + var(--space-3)) 0 var(--space-7);
+  border-radius: var(--radius-pill);
+  border: 0;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+  font: var(--text-body);
+}
+.map-search__input::placeholder { color: var(--color-text-muted); }
+.map-search__input::-webkit-search-cancel-button { cursor: pointer; }
+.map-search__popup {
+  position: absolute; top: calc(100% + var(--space-3)); inset-inline: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
+  padding: var(--space-2);
+  max-height: 220px; overflow-y: auto;
+}
+.map-search__status { margin: 0; padding: var(--space-4) var(--space-5); font: var(--text-label); color: var(--color-text-muted); }
+.map-search__list { list-style: none; margin: 0; padding: 0; }
+.map-search__option {
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex; flex-direction: column; gap: var(--space-1);
+}
+.map-search__option.is-active { background: var(--color-surface-muted); }
+.map-search__label { font: var(--text-body); font-weight: 500; }
+.map-search__detail { font: var(--text-caption); color: var(--color-text-muted); }
+
+/* ---- draw toolbar -------------------------------------------------------- */
+.draw-toolbar {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-radius: var(--radius-composer);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-toolbar);
+}
+.draw-toolbar__btn {
+  height: 36px;
+  padding: 0 var(--space-6);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  font: var(--text-label); font-weight: 500;
+  color: var(--color-text);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.draw-toolbar__btn:hover:not(:disabled) { background: var(--color-surface-muted); }
+.draw-toolbar__btn.is-active { background: var(--color-accent-soft); color: var(--color-accent-strong); }
+.draw-toolbar__btn.is-armed { box-shadow: inset 0 0 0 1px var(--color-accent); }
+.draw-toolbar__btn--danger { color: var(--color-danger); }
+.draw-toolbar__divider { width: 1px; height: 22px; background: var(--color-border); margin: 0 var(--space-1); }
+
+/* ---- coordinates --------------------------------------------------------- */
+.coords {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1);
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--color-overlay);
+  font: var(--text-caption);
+  color: var(--color-text);
+}
+.coords__value { font-family: var(--font-mono); font-size: 12px; }
+.coords__attribution { font: var(--text-caption); color: var(--color-text-muted); }
+.coords__attribution a { color: inherit; }
+
+/* Narrow maps: draw buttons collapse to icons (labels stay for screen readers),
+   and the search gives the controls room. */
+@container map-card (max-width: 720px) {
+  .draw-toolbar__label {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .draw-toolbar__btn { padding: 0 var(--space-5); }
+}
+@container map-card (max-width: 480px) {
+  .map-card__search { width: calc(100% - 2 * var(--space-6)); }
+  .map-card__controls { top: calc(var(--space-6) + 42px + var(--space-3)); }
+  .coords__value { display: none; }
+}
+
+/* ---- Leaflet layers ------------------------------------------------------ */
+.gs-map--drawing { cursor: crosshair; }
+.gs-map--freehand { touch-action: none; cursor: crosshair; }
+.gs-map--freehand .leaflet-interactive { cursor: crosshair; }
+
+/* The area: gradient stroke and fill (GeoMap injects the gradients). */
+path.gs-area { stroke: url(#gs-area-stroke); fill: url(#gs-area-fill); fill-opacity: 1; }
+path.gs-area.gs-area--invalid { stroke: var(--color-danger); stroke-dasharray: 6 6; fill: var(--color-danger); fill-opacity: 0.12; }
+
+.leaflet-tooltip.gs-area-label {
+  background: var(--color-surface);
+  border: 0;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-float);
+  padding: var(--space-2) var(--space-5);
+  font: var(--text-label); font-weight: 500;
+  color: var(--color-accent-strong);
+  direction: rtl;
+  white-space: nowrap;
+}
+.leaflet-tooltip.gs-area-label::before { display: none; }
+.leaflet-tooltip.gs-area-label--invalid { color: var(--color-danger); }
+
+/* Vertex handles: white with a 3px accent ring, radius 7. */
+.leaflet-marker-icon.marker-icon {
+  width: 14px !important; height: 14px !important;
+  margin-left: -7px !important; margin-top: -7px !important;
+  border-radius: 50%;
+  background: var(--color-surface);
+  border: 3px solid var(--color-accent);
+  box-shadow: none;
+}
+.leaflet-marker-icon.marker-icon-middle {
+  opacity: 0.7;
+  width: 10px !important; height: 10px !important;
+  margin-left: -5px !important; margin-top: -5px !important;
+  border-width: 2px;
+}
+
+/* Result markers: periwinkle, 3px white ring, numbered like the list. */
+.gs-marker-wrap { background: transparent; border: 0; }
+.gs-marker {
+  width: 24px; height: 24px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--color-result);
+  border: 3px solid #FFFFFF;
+  box-shadow: var(--shadow-float);
+  font: var(--text-caption); font-weight: 600;
+  color: var(--color-on-result);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.gs-marker-wrap--active .gs-marker {
+  transform: scale(1.3);
+  box-shadow: 0 0 0 3px var(--color-result-strong), var(--shadow-float);
+}
+.gs-marker-wrap:focus-visible { outline: none; }
+.gs-marker-wrap:focus-visible .gs-marker { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+/* Dark theme: light street tiles are inverted to a dark map (hue kept, so water
+   stays blue). Basemaps with their own dark tiles or imagery are untouched. */
+.gs-map--dark .gs-tiles--dimmable { filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9) saturate(0.8); }
+.gs-map--dark.leaflet-container,
+.gs-map--dark .leaflet-container { background: var(--color-bg-app); }
+/* Geoman's drawing hints use Leaflet's default white tooltip. */
+.leaflet-tooltip:not(.gs-area-label) {
+  background: var(--color-surface); color: var(--color-text);
+  border-color: var(--color-border); box-shadow: var(--shadow-float);
+  font: var(--text-caption);
+}
